@@ -977,7 +977,7 @@ long_jokes = false
                 # Create BLE connection (default)
                 ble_device_name = self.config.get('Connection', 'ble_device_name', fallback=None)
                 self.logger.info(f"Connecting via BLE" + (f" to device: {ble_device_name}" if ble_device_name else ""))
-                self.meshcore = await meshcore.MeshCore.create_ble(ble_device_name, debug=False)
+                self.meshcore = await meshcore.MeshCore.create_ble(ble_device_name, debug=False, auto_reconnect=True, max_reconnect_attempts=10)
             
             if self.meshcore.is_connected:
                 self.connected = True
@@ -1321,6 +1321,23 @@ long_jokes = false
                         )
                         asyncio.create_task(self._restart_service(name, service))
 
+                # Periodic advert check
+                advert_interval = self.config.getfloat('Bot', 'advert_interval_hours', fallback=0)
+                if advert_interval > 0:
+                    interval_seconds = advert_interval * 3600
+                    last = self.last_advert_time or 0
+                    if time.time() - last >= interval_seconds:
+                        try:
+                            self.logger.info("Sending periodic zero-hop advert (local discovery)")
+                            await self.meshcore.commands.send_advert(flood=False)
+                            await asyncio.sleep(2)
+                            self.logger.info("Sending periodic flood advert")
+                            await self.meshcore.commands.send_advert(flood=True)
+                            self.last_advert_time = time.time()
+                            self.logger.info("Periodic adverts sent successfully")
+                        except Exception as e:
+                            self.logger.error(f"Error sending periodic advert: {e}")
+
                 await asyncio.sleep(5)  # Check every 5 seconds
         except KeyboardInterrupt:
             self.logger.info("Received interrupt signal")
@@ -1543,6 +1560,11 @@ long_jokes = false
                 self.logger.debug("Sending zero-hop advert")
                 await self.meshcore.commands.send_advert(flood=False)
             elif startup_advert == 'flood':
+                # Send zero-hop first for nearby companion discovery,
+                # then flood for network-wide reach
+                self.logger.debug("Sending zero-hop advert (local discovery)")
+                await self.meshcore.commands.send_advert(flood=False)
+                await asyncio.sleep(2)
                 self.logger.debug("Sending flood advert")
                 await self.meshcore.commands.send_advert(flood=True)
             else:
