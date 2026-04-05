@@ -96,7 +96,9 @@ class RepeaterManager:
                 contact_source TEXT DEFAULT 'advertisement',
                 out_path TEXT,
                 out_path_len INTEGER,
-                is_starred INTEGER DEFAULT 0
+                is_starred INTEGER DEFAULT 0,
+                firmware_version TEXT,
+                firmware_version_date TIMESTAMP
             ''')
             
             # Create daily_stats table for daily statistics tracking
@@ -257,6 +259,14 @@ class RepeaterManager:
                         self.logger.info("Adding is_starred column to complete_contact_tracking")
                         cursor.execute("ALTER TABLE complete_contact_tracking ADD COLUMN is_starred BOOLEAN DEFAULT 0")
                         conn.commit()
+                    for column_name, column_type in [
+                        ('firmware_version', 'TEXT'),
+                        ('firmware_version_date', 'TIMESTAMP'),
+                    ]:
+                        if column_name not in tracking_columns:
+                            self.logger.info(f"Adding missing column to complete_contact_tracking: {column_name}")
+                            cursor.execute(f"ALTER TABLE complete_contact_tracking ADD COLUMN {column_name} {column_type}")
+                            conn.commit()
             except Exception as e:
                 self.logger.warning(f"Migration complete_contact_tracking: {e}")
 
