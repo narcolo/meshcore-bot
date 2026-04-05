@@ -36,7 +36,7 @@
     "help": {
       "description": "Shows commands. Use 'help <command>' for details.",
       "general": "MeshCore Bot Help\n\nAvailable Commands:\n{commands_list}",
-      "unknown": "Unknown command: '{command}'\n\nAvailable commands:\n{available}",
+      "unknown": "Unknown command: '{command}'. Send 'help' for list.",
       "specific": "Help for '{command}':\n{help_text}",
       "no_help": "No help available",
       "usage_examples": "\nUsage Examples:\n• `help @` - Get help for @{string} syntax\n• `help t` - Get help for t {string} syntax\n• `help advert` - Get help for advert command\n• `help test` - Get help for test command\n• `help ping` - Get help for ping command",
@@ -904,6 +904,11 @@
         "Good evening", "Buenas noches", "Boa noite", "Dobro veče",
         "Dobryy vecher", "Selamat malam", "Konbanwa", "Ahlan bi-layl",
         "Erev tov"
+      ],
+      "night_greetings": [
+        "Good night", "Nighty night", "Sleep well", "Sweet dreams",
+        "Buenas noches", "Boa noite", "Bonne nuit", "Gute Nacht",
+        "Buona notte", "Oyasumi", "Spokojnej nocy", "Dobranoc"
       ],
       "human_descriptors": [
         "human", "carbon-based lifeform", "organic entity", "biological unit",

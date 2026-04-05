@@ -67,9 +67,15 @@ class HelloCommand(BaseCommand):
         ]
         
         self.evening_greetings_fallback = [
-            "Good evening", "Buenas noches", "Boa noite", "Dobro veče", 
-            "Dobryy vecher", "Selamat malam", "Konbanwa", "Ahlan bi-layl", 
+            "Good evening", "Buenas noches", "Boa noite", "Dobro veče",
+            "Dobryy vecher", "Selamat malam", "Konbanwa", "Ahlan bi-layl",
             "Erev tov"
+        ]
+
+        self.night_greetings_fallback = [
+            "Good night", "Nighty night", "Sleep well", "Sweet dreams",
+            "Buenas noches", "Boa noite", "Bonne nuit", "Gute Nacht",
+            "Buona notte", "Oyasumi", "Spokojnej nocy", "Dobranoc"
         ]
         
         # Randomized human descriptors
@@ -223,7 +229,7 @@ class HelloCommand(BaseCommand):
     
     def get_evening_greetings(self) -> List[str]:
         """Get evening greetings from translations or fallback.
-        
+
         Returns:
             List[str]: A list of evening greeting strings.
         """
@@ -231,6 +237,17 @@ class HelloCommand(BaseCommand):
         if greetings and isinstance(greetings, list) and len(greetings) > 0:
             return greetings
         return self.evening_greetings_fallback
+
+    def get_night_greetings(self) -> List[str]:
+        """Get night greetings from translations or fallback.
+
+        Returns:
+            List[str]: A list of night greeting strings.
+        """
+        greetings = self.translate_get_value('commands.hello.night_greetings')
+        if greetings and isinstance(greetings, list) and len(greetings) > 0:
+            return greetings
+        return self.night_greetings_fallback
     
     def get_human_descriptors(self) -> List[str]:
         """Get human descriptors from translations or fallback.
@@ -300,37 +317,77 @@ class HelloCommand(BaseCommand):
         if self.is_emoji_only_message(content):
             response = self.get_emoji_response(content, bot_name)
         else:
-            # Get random robot greeting
-            random_greeting = self.get_random_greeting()
+            # Detect greeting type from user's message and match it
+            random_greeting = self.get_random_greeting(user_message=content)
             response_format = self.translate('commands.hello.response_format')
             response = f"{random_greeting} {response_format}".format(bot_name=bot_name)
         
         return await self.send_response(message, response)
     
-    def get_random_greeting(self) -> str:
-        """Generate a random robot greeting by combining opening and descriptor"""
+    def _detect_greeting_type(self, text: str) -> str:
+        """Detect the type of greeting from user's message.
+
+        Returns: 'morning', 'afternoon', 'evening', 'night', or 'generic'.
+        """
+        text_lower = text.lower().strip()
+
+        night_words = ['good night', 'night', 'dobranoc', 'dobrej nocy', 'spokojnej nocy',
+                       'buenas noches', 'bonne nuit', 'gute nacht', 'oyasumi']
+        morning_words = ['good morning', 'morning', 'dzień dobry', 'dobre rano',
+                         'buenos dias', 'bonjour', 'guten morgen']
+        afternoon_words = ['good afternoon', 'afternoon', 'dobre popołudnie',
+                           'buenas tardes', 'boa tarde']
+        evening_words = ['good evening', 'evening', 'dobry wieczór', 'wieczór',
+                         'buenas noches', 'konbanwa']
+
+        for w in night_words:
+            if w in text_lower:
+                return 'night'
+        for w in morning_words:
+            if w in text_lower:
+                return 'morning'
+        for w in afternoon_words:
+            if w in text_lower:
+                return 'afternoon'
+        for w in evening_words:
+            if w in text_lower:
+                return 'evening'
+        return 'generic'
+
+    def get_random_greeting(self, user_message: str = '') -> str:
+        """Generate a random robot greeting matching user's greeting type or time of day."""
         tz, _ = get_config_timezone(self.bot.config, self.logger)
         current_time = datetime.datetime.now(tz)
-        
-        # Get current hour to determine time of day
+
         current_hour = current_time.hour
-        
+
         # Get greeting arrays from translations or fallback
-        greeting_openings = self.get_greeting_openings()
         morning_greetings = self.get_morning_greetings()
         afternoon_greetings = self.get_afternoon_greetings()
         evening_greetings = self.get_evening_greetings()
+        night_greetings = self.get_night_greetings()
+        greeting_openings = self.get_greeting_openings()
         human_descriptors = self.get_human_descriptors()
-        
-        # Choose appropriate greeting based on time of day
-        if 5 <= current_hour < 12:  # Morning (5 AM - 12 PM)
+
+        # Match user's greeting type if detected, otherwise use time of day
+        greeting_type = self._detect_greeting_type(user_message) if user_message else 'generic'
+
+        if greeting_type == 'night':
+            greeting_pool = night_greetings
+        elif greeting_type == 'morning':
+            greeting_pool = morning_greetings
+        elif greeting_type == 'afternoon':
+            greeting_pool = afternoon_greetings
+        elif greeting_type == 'evening':
+            greeting_pool = evening_greetings
+        elif 5 <= current_hour < 12:
             greeting_pool = morning_greetings + greeting_openings
-        elif 12 <= current_hour < 17:  # Afternoon (12 PM - 5 PM)
+        elif 12 <= current_hour < 17:
             greeting_pool = afternoon_greetings + greeting_openings
-        elif 17 <= current_hour < 22:  # Evening (5 PM - 10 PM)
+        elif 17 <= current_hour < 22:
             greeting_pool = evening_greetings + greeting_openings
-        else:  # Night/Late night (10 PM - 5 AM)
-            greeting_pool = evening_greetings + greeting_openings
+        else:
+            greeting_pool = night_greetings + greeting_openings
         
         opening = random.choice(greeting_pool)
         descriptor = random.choice(human_descriptors)
