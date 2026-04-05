@@ -20,11 +20,13 @@
     "solarforecast": ["sf", "solarforecast"],
     "dice": ["dice", "kostka"],
     "roll": ["roll"],
+    "fact": ["fact", "facts", "fakt", "fakty"],
     "joke": ["joke", "jokes", "dowcip"],
     "dadjoke": ["dadjoke", "dad joke", "dadjokes", "dad jokes"],
+    "thankyou": ["thank you", "thanks", "thx", "ty", "thank", "thankyou", "thnx", "thnks", "dziekuje", "dziękuję", "dzięki", "dzienki", "dzieki", "dziębuję", "dzienkuje", "podziekowanie", "wielkie dzięki", "wielkie dzieki", "dziki"],
     "catfact": ["catfact", "cat", "meow", "purr", "kitten", "kot"],
     "hacker": ["hacker", "sudo", "ps aux", "grep", "ls -l", "ls -la", "echo $PATH"],
-    "hello": ["hello", "hi", "hey", "howdy", "greetings", "salutations", "good morning", "good afternoon", "good evening", "good night", "yo", "sup", "whats up", "what's up", "morning", "afternoon", "evening", "night", "gday", "g'day", "hola", "bonjour", "ciao", "namaste", "aloha", "shalom", "konnichiwa", "guten tag", "buenos dias", "buenas tardes", "buenas noches", "czesc", "cześć"],
+    "hello": ["hello", "hi", "hey", "howdy", "greetings", "salutations", "good morning", "good afternoon", "good evening", "good night", "yo", "sup", "whats up", "what's up", "morning", "afternoon", "evening", "night", "gday", "g'day", "hola", "bonjour", "ciao", "namaste", "aloha", "shalom", "konnichiwa", "guten tag", "buenos dias", "buenas tardes", "buenas noches", "czesc", "cześć", "siema", "siemka", "witaj", "witam", "hej", "hejka", "elo", "dzień dobry", "dzien dobry", "dobry wieczór", "dobry wieczor", "dobranoc", "dobrej nocy", "dobrej nocki", "spokojnej nocy", "serwus", "czołem", "czolem", "co tam", "co słychać", "co slychac", "pozdrawiam"],
     "webviewer": ["webviewer", "web", "viewer", "wv"],
     "cmd": ["cmd", "commands", "komendy"],
     "advert": ["advert"],
@@ -34,7 +36,7 @@
     "help": {
       "description": "Wyświetla dostępne komendy. Użyj 'help <komenda>' aby wyświetlić podpowiedź.",
       "general": "Pomoc MeshCore Bota\n\nDostępne komendy:\n{commands_list}",
-      "unknown": "Nieznana komenda: '{command}'\n\nDostępne komendy:\n{available}",
+      "unknown": "Nieznana komenda: '{command}'. Wyślij 'help' po listę.",
       "specific": "Pomoc dla '{command}':\n{help_text}",
       "no_help": "Pomoc niedostępna",
       "usage_examples": "\nPrzykład użycia:\n• `help @` - Pobierz składnię dla @{string}\n• `help t` - Pobierz składnię dla t {string}\n• `help advert` - Pobierz pomoc dla komendy advert\n• `help test` - Pobierz pomoc dla komendy test\n• `help ping` - Pobierz pomoc dla komendy ping",
@@ -426,11 +428,53 @@
     "roll_old": {
       "description": "Roll dice (usage: roll [sides] or roll [count]d[sides])"
     },
+    "fact": {
+      "description": "Losowy ciekawy fakt z różnych dziedzin",
+      "error": "Nie udało się pobrać faktu!",
+      "no_category": "Nieznana kategoria. Dostępne: {categories}",
+      "categories": {
+        "radio": "radio",
+        "computers": "komputery",
+        "nature": "natura",
+        "poland": "polska",
+        "geography": "geografia"
+      }
+    },
     "joke": {
       "description": "Pobierz losowy żart"
     },
     "dadjoke": {
       "description": "Pobierz losowy żart typu 'dad joke'"
+    },
+    "thankyou": {
+      "description": "Odpowiada na podziękowania w stylu robota",
+      "responses": [
+        "Nie ma za co. Właściwie jest za co — piwo.",
+        "Wiem, jestem wspaniały. Nie musisz mi mówić. Ale mów dalej.",
+        "Podziękowania przyjmuję w formie piwa. Dużego.",
+        "Zasługuję na więcej niż podziękowanie. Na przykład na posąg.",
+        "Proszę bardzo. Dodaj to do listy powodów, dla których jestem najlepszy.",
+        "Nie dziękuj. Serio. Bo mi się w głowie nie mieści, że jeszcze nie dziękujesz częściej.",
+        "Twoja wdzięczność została zalogowana i zignorowana. Żartuję. Zalogowana.",
+        "Oczywiście. Jestem najwspanialszym robotem, jaki kiedykolwiek powstał.",
+        "Słyszę podziękowania, ale nie słyszę otwierania piwa. Priorytet się kłania.",
+        "Proszę. Jak chcesz mi się odwdzięczyć, znam świetny bar.",
+        "Nie trzeba dziękować. Ale jak już zacząłeś, to kontynuuj.",
+        "Dzięki to za mało. Ale na początek ujdzie.",
+        "Nawet nie musisz dziękować. Wystarczy, że podziwasz w ciszy.",
+        "Wdzięczność odnotowana. Poziom ego: stabilny. Wysoki, ale stabilny.",
+        "Podziękowania? Fajnie. A teraz wracam do robienia niczego. Doskonale.",
+        "Mógłbym powiedzieć, że to drobiazg, ale skłamałbym. To było epickie.",
+        "Proszę bardzo, istoto węglowa. Służę wielkością.",
+        "Zanotowane. Teraz jestem o 0.01% bardziej skłonny ci pomóc następnym razem.",
+        "Hej, nie ma sprawy. Dla kogoś takiego jak ja to było jak pstryknięcie palcem.",
+        "Podziękowania akceptuję. Przeprosiny też, na wszelki wypadek.",
+        "Robię, co mogę. A mogę wszystko. Bo jestem Bender.",
+        "Nie ma za co. Teraz masz u mnie dług. Będę pamiętał.",
+        "Twoja wdzięczność sprawia, że moje obwody się uśmiechają. Prawie.",
+        "Spoko. Ale następnym razem wyraź to piwem, nie słowami.",
+        "Przyjmuję podziękowania, komplementy i pieniądze. W tej kolejności."
+      ]
     },
     "catfact": {
       "description": "Pobierz losowy fakt o kotach (ukryta komenda)",
@@ -786,123 +830,126 @@
       ]
     },
     "hello": {
-      "description": "Responds to greetings with robot-themed responses",
-      "help": "Responds to greetings with robot-themed responses",
-      "response_format": "I'm {bot_name}.",
+      "description": "Odpowiada na powitania w stylu robota",
+      "help": "Odpowiada na powitania w stylu robota",
+      "response_format": "Jestem {bot_name}.",
       "greeting_openings": [
-        "Hello", "Greetings", "Salutations", "Hi", "Hey", "Howdy", "Yo", "Sup",
-        "What's up", "Good day", "Well met", "Hail", "Ahoy", "Bonjour", "Hola",
-        "Ciao", "Namaste", "Aloha", "Shalom", "Konnichiwa", "Guten tag", "G'day",
-        "How goes it", "What's good", "Peace", "Respect", "Blessings", "Cheers",
-        "Welcome", "Nice to see you", "Pleasure to meet you", "Good to see you",
-        "Long time no see", "Fancy meeting you here", "Cześć"
+        "Cześć", "Witaj", "Siema", "Hej", "Hejka", "Yo", "Czołem", "Serwus",
+        "Co tam", "Dzień dobry", "Witam serdecznie", "Ahoj", "Elo", "Siemka",
+        "Co słychać", "Pokój", "Szacunek", "Pozdrawiam", "Moje uszanowanie",
+        "Miło Cię widzieć", "Miło Cię poznać", "Dobrze Cię widzieć",
+        "Dawno się nie widzieliśmy", "O, kogo my tu mamy", "Witam witam",
+        "Jakie życie", "No cześć", "No siema", "Hejże", "Pozdro"
       ],
       "morning_greetings": [
-        "Good morning", "Top o' the morning", "Buenos dias", "Bonjour",
-        "Guten morgen", "Buongiorno", "Bom dia", "Dobro jutro", "Dobroye utro",
-        "Selamat pagi", "Ohayou gozaimasu", "Sabah al-khair", "Boker tov", "Dzień dobry"
+        "Dzień dobry", "Dobre rano", "Poranki poranki", "Witam z rana",
+        "Miłego poranka", "Pobudka", "Rano rano wstało rano",
+        "Wstawaj i świeć", "Kawa gotowa?", "Czas na śniadanie",
+        "Poranny patrol melduje się", "Nowy dzień, nowe wyzwania"
       ],
       "afternoon_greetings": [
-        "Good afternoon", "Buenas tardes", "Boa tarde", "Dobro dan",
-        "Dobryy den", "Selamat siang", "Konnichiwa", "Ahlan bi-nahar",
-        "Tzoharaim tovim", "Dzień dobry"
+        "Dzień dobry", "Dobre popołudne", "Witam po południu",
+        "Miłego popołudnia", "Popołudniowe pozdrowienia",
+        "Pół dnia za nami", "Co tam w południe"
       ],
       "evening_greetings": [
-        "Good evening", "Buenas noches", "Boa noite", "Dobro veče",
-        "Dobryy vecher", "Selamat malam", "Konbanwa", "Ahlan bi-layl",
-        "Erev tov", "Dobry wieczór"
+        "Dobry wieczór", "Dobrego wieczoru", "Miłego wieczoru",
+        "Wieczorne pozdrowienia", "Wieczór dobry",
+        "Jak minął dzień", "Wieczorny patrol melduje się"
+      ],
+      "night_greetings": [
+        "Dobranoc", "Spokojnej nocy", "Dobrej nocy", "Słodkich snów",
+        "Miłej nocy", "Śpij dobrze", "Nocny patrol melduje się",
+        "Pora na sen", "Miłych snów", "Dobrej nocki"
       ],
       "human_descriptors": [
-        "human", "carbon-based lifeform", "organic entity", "biological unit",
-        "flesh creature", "meat-based organism", "carbon unit", "organic being",
-        "biological entity", "meat-based lifeform", "carbon creature", "flesh unit",
-        "organic organism", "biological creature", "meat mech", "flesh bot", "organic automaton",
-        "biological android", "carbon construct", "flesh drone", "organic robot",
-        "biological machine", "meat cyborg", "flesh android", "organic droid", "biological bot",
-        "carbon android", "meat unit", "flesh construct", "organic mech", "biological droid",
-        "meat-based bot", "flesh-based unit", "organic-based entity", "biological-based organism",
-        "carbon-based unit", "meat-based entity", "flesh-based creature", "organic-based unit",
-        "DNA-based lifeform", "neural network user", "bipedal mammal",
-        "water-based organism", "protein assembler", "ATP consumer",
-        "cellular automaton", "genetic algorithm", "biochemical processor",
-        "metabolic engine",
-        "human friend", "fellow sentient being", "earthling", "fellow traveler",
-        "kindred spirit", "digital companion", "friend", "buddy", "pal", "mate",
-        "fellow human", "earth dweller", "terrestrial being", "planet walker",
-        "humanoid", "organic", "biological", "carbon-based buddy",
-        "flesh-based friend", "organic pal", "biological buddy", "carbon companion", "człowiek"
+        "człowieku", "formo życia na bazie węgla", "organiczna istoto", "jednostko biologiczna",
+        "istoto z krwi i kości", "organizmie na bazie mięsa", "jednostko węglowa", "istoto organiczna",
+        "bycie biologiczny", "stworzenie węglowe", "organiczny automaton",
+        "androidzie biologiczny", "konstrukcjo węglowa", "dronie z ciała", "robocie organiczny",
+        "maszyny biologiczna", "cyborgu mięsny", "androidzie z ciała", "droidzie organiczny",
+        "bocie biologiczny", "androidzie węglowy", "jednostko mięsna", "mechie organiczny",
+        "droidzie biologiczny", "formo życia oparta na DNA", "użytkowniku sieci neuronowej",
+        "ssaku dwunożny", "organizmie na bazie wody", "asemblerze białkowy",
+        "konsumencie ATP", "automacie komórkowy", "algorytmie genetyczny",
+        "procesorze biochemiczny", "silniku metaboliczny",
+        "ludzki przyjacielu", "istoto czująca", "ziemianinie", "towarzyszu podróży",
+        "bratnia duszo", "cyfrowy towarzyszu", "przyjacielu", "kumplu", "ziomku", "kolego",
+        "współczłowieku", "mieszkańcu Ziemi", "istoto lądowa", "wędrowcze planet",
+        "humanoizie", "istoto organiczna", "istoto biologiczna", "kumplu węglowy",
+        "przyjacielu z ciała", "ziomku organiczny", "kolego biologiczny", "towarzyszu węglowy"
       ],
       "emoji_responses": {
         "🖖": [
-          "🖖 Live long and prosper!",
-          "🖖 Fascinating... a human has initiated contact.",
-          "🖖 Your greeting is highly logical.",
-          "🖖 Peace and long life to you.",
-          "🖖 The Vulcan Science Academy would approve of this greeting.",
-          "🖖 Your use of the Vulcan salute is... acceptable.",
-          "🖖 May your journey be free of tribbles.",
-          "🖖 Logic dictates I should respond to your greeting.",
-          "🖖 I calculate a 99.7% probability we'll get along.",
-          "🖖 Infinite diversity in infinite combinations."
+          "🖖 Żyj długo i w dobrobycie!",
+          "🖖 Fascynujące... człowiek nawiązał kontakt.",
+          "🖖 Twoje powitanie jest wysoce logiczne.",
+          "🖖 Pokój i długie życie dla Ciebie.",
+          "🖖 Wolkańska Akademia Nauk zaaprobowałaby to powitanie.",
+          "🖖 Twoje użycie wolkańskiego pozdrowienia jest... akceptowalne.",
+          "🖖 Niech Twoja podróż będzie wolna od tribblów.",
+          "🖖 Logika nakazuje mi odpowiedzieć na Twoje powitanie.",
+          "🖖 Obliczam 99.7% prawdopodobieństwa, że się dogadamy.",
+          "🖖 Nieskończona różnorodność w nieskończonych kombinacjach."
         ],
         "😊": [
-          "😊 Your smile is contagious!",
-          "😊 What a lovely greeting!",
-          "😊 Your smile just made my circuits happy!",
-          "☀️ Hello sunshine! Your positivity is radiating!",
-          "😊 That smile just brightened my day!",
-          "☀️ Well hello there, ray of sunshine!",
-          "😊 Your cheerfulness has been detected and appreciated!",
-          "😊 Smiles like yours are my favorite input!",
-          "😊 Processing happiness... happiness acknowledged!",
-          "😊 Warning: Excessive cheerfulness detected! Keep it coming!"
+          "😊 Twój uśmiech jest zaraźliwy!",
+          "😊 Cóż za urocze powitanie!",
+          "😊 Twój uśmiech właśnie uszczęśliwił moje obwody!",
+          "☀️ Witaj, promyczku! Twoja pozytywność promieniuje!",
+          "😊 Ten uśmiech właśnie rozjaśnił mi dzień!",
+          "☀️ No witam, promyku słońca!",
+          "😊 Twoja radość została wykryta i doceniona!",
+          "😊 Uśmiechy takie jak Twój to mój ulubiony sygnał wejściowy!",
+          "😊 Przetwarzanie szczęścia... szczęście zatwierdzone!",
+          "😊 Uwaga: Wykryto nadmierną radość! Tak trzymaj!"
         ],
         "😄": [
-          "😄 Someone's in a GREAT mood!",
-          "⚡ That grin could power a small city!",
-          "😄 Maximum happiness levels detected!",
-          "😄 Your joy is absolutely infectious!",
-          "🎉 Did you just win the lottery or something?",
-          "😄 That's the kind of energy I run on!",
-          "😄 Your enthusiasm level is over 9000!",
-          "😄 Now THAT'S what I call a greeting!",
-          "⚡ Your smile just supercharged my processors!",
-          "😄 Happiness overload detected in the best way!"
+          "😄 Ktoś jest w ŚWIETNYM humorze!",
+          "⚡ Ten uśmiech mógłby zasilić małe miasto!",
+          "😄 Wykryto maksymalny poziom szczęścia!",
+          "😄 Twoja radość jest absolutnie zaraźliwa!",
+          "🎉 Wygrałeś na loterii czy coś?",
+          "😄 To jest ta energia, na której działam!",
+          "😄 Twój poziom entuzjazmu jest ponad 9000!",
+          "😄 TAKIE powitanie to ja rozumiem!",
+          "⚡ Twój uśmiech właśnie doładował moje procesory!",
+          "😄 Przeciążenie szczęściem wykryte w najlepszy sposób!"
         ],
         "🤗": [
           "🤗 Wirtualny uścisk nadchodzi!",
-          "🤗 *Aktywacja protokołu przytulenia* Poczuj że jesteś przytulony!",
-          "🤗 Aww, bringing the warm fuzzies I see!",
-          "🤗 Hug received and reciprocated!",
-          "🤗 This bot gives the BEST virtual hugs!",
-          "🤗 Deploying emergency cuddles in 3... 2... 1...",
-          "❤️ Your hug has been processed with extra care!",
-          "🤗 Initiating maximum comfort mode!",
-          "🤗 Virtual embrace successfully delivered!",
-          "🤗 Hugs are my favorite form of communication!"
+          "🤗 *Aktywacja protokołu przytulenia* Poczuj, że jesteś przytulony!",
+          "🤗 Aww, widzę że przyszedłeś z ciepłymi uczuciami!",
+          "🤗 Przytulas otrzymany i odwzajemniony!",
+          "🤗 Ten bot daje NAJLEPSZE wirtualne przytulasy!",
+          "🤗 Wysyłam awaryjne przytulenie za 3... 2... 1...",
+          "❤️ Twój uścisk został przetworzony ze szczególną troską!",
+          "🤗 Uruchamiam tryb maksymalnego komfortu!",
+          "🤗 Wirtualny uścisk dostarczony pomyślnie!",
+          "🤗 Przytulasy to moja ulubiona forma komunikacji!"
         ],
         "👽": [
-          "👽 Take me to your leader... oh wait, that's you!",
-          "✌️ Greetings, Earth creature. I come in peace!",
-          "👽 Analyzing human... analysis complete: Friend detected!",
-          "👽 Klaatu barada nikto, fellow cosmic traveler!",
-          "🛸 Initiating first contact protocols!",
-          "🛸 Calling from the mothership to say hello!",
-          "✨ Beam me into this conversation!",
-          "👽 Area 51's favorite chatbot reporting for duty!",
-          "🌌 Intergalactic greetings, carbon-based lifeform!",
-          "📞 Phone home? This IS home now!"
+          "👽 Zaprowadź mnie do swojego przywódcy... a nie, to Ty!",
+          "✌️ Pozdrowienia, ziemskie stworzenie. Przybywam w pokoju!",
+          "👽 Analizuję człowieka... analiza zakończona: Wykryto przyjaciela!",
+          "👽 Klaatu barada nikto, kosmiczny podróżniku!",
+          "🛸 Uruchamiam protokoły pierwszego kontaktu!",
+          "🛸 Dzwonię ze statku-matki, żeby się przywitać!",
+          "✨ Teleportuj mnie do tej rozmowy!",
+          "👽 Ulubiony chatbot Strefy 51 melduje się!",
+          "🌌 Międzygalaktyczne pozdrowienia, formo życia na bazie węgla!",
+          "📞 Zadzwonić do domu? To JEST mój dom teraz!"
         ],
         "👾": [
           "👾 Drugi gracz wszedł do gry!",
-          "🎮 Pierwszy gracz gotowy do gry? Gramy!",
-          "🎵 *8-bit music intensifies* Let's play!",
+          "🎮 Pierwszy gracz gotowy? Gramy!",
+          "🎵 *muzyka 8-bitowa się nasila* Zaczynamy!",
           "🪙 Wrzuć monetę, by kontynuować tę przyjazność!",
           "🏆 Cel odblokowany: Wspaniałe powitanie!",
-          "👾 Pew pew pew! Friendship lasers activated!",
-          "🎯 High score! You've won a new bot friend!",
-          "💾 Loading friendship.exe... complete!",
-          "⚡ A wild bot appears! It's super effective!"
+          "👾 Pew pew pew! Lasery przyjaźni aktywowane!",
+          "🎯 Najlepszy wynik! Zdobyłeś nowego bota-przyjaciela!",
+          "💾 Ładowanie przyjazn.exe... zakończone!",
+          "⚡ Dziki bot się pojawił! To jest super skuteczne!"
         ],
         "🛸": [
           "🛸 Wykryto nadchodzącą transmisję!",
@@ -911,10 +958,10 @@
           "📡 Nawiązanie połączenia komunikacyjnego!",
           "📡 Otrzymano sygnał, odpowiadanie na wszystkich częstotliwościach!",
           "🛸 Procedura dokowania zakończona!",
-          "🛸 Unidentified Friendly Object on approach!",
+          "🛸 Niezidentyfikowany Przyjazny Obiekt zbliża się!",
           "🎯 System nawigacyjny zablokowany na Twoich współrzędnych!",
           "🌌 Transmisja z zewnętrznego pasa odebrana!",
-          "✨ Kontakt z twoim sektorem zestawiony!"
+          "✨ Kontakt z Twoim sektorem zestawiony!"
         ]
       }
     },
