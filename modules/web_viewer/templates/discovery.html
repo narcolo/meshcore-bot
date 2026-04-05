@@ -1,0 +1,400 @@
+{% extends "base.html" %}
+
+{% block title %}Discovery Heatmap - MeshCore Bot Data Viewer{% endblock %}
+
+{% block content %}
+<style>
+    #discovery-container {
+        display: flex;
+        flex-direction: column;
+        height: calc(100vh - 110px);
+    }
+    #discovery-map {
+        flex: 1;
+        min-height: 0;
+        border-radius: 8px;
+    }
+    .discovery-card {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+    }
+    .map-row {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        margin-bottom: 1rem;
+    }
+    .map-row > .col-12 {
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        flex: 1;
+    }
+    .legend-box {
+        position: absolute;
+        bottom: 30px;
+        right: 10px;
+        z-index: 1000;
+        background: var(--card-bg, #fff);
+        border: 1px solid var(--border-color, #dee2e6);
+        border-radius: 6px;
+        padding: 10px 14px;
+        font-size: 0.85rem;
+        color: var(--text-color, #212529);
+        box-shadow: 0 2px 6px var(--shadow-color, rgba(0,0,0,0.1));
+    }
+    .legend-dot {
+        display: inline-block;
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        margin-right: 6px;
+        vertical-align: middle;
+    }
+    .legend-observer { background: #dc3545; }
+    .legend-node { background: #0d6efd; }
+</style>
+
+<!-- Leaflet CSS -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+<div id="discovery-container" class="d-flex flex-column">
+    <div class="row">
+        <div class="col-12">
+            <h1 class="mb-3">
+                <i class="fas fa-binoculars"></i> Discovery Heatmap
+            </h1>
+        </div>
+    </div>
+
+    <!-- Stats Cards -->
+    <div class="row mb-3 g-2">
+        <div class="col">
+            <div class="card">
+                <div class="card-body p-2 d-flex align-items-center justify-content-between">
+                    <div class="d-flex align-items-center">
+                        <i class="fas fa-clipboard-list me-2"></i>
+                        <div>
+                            <small class="text-muted d-block" style="font-size:0.7rem">Sessions</small>
+                            <strong id="stat-sessions">0</strong>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col">
+            <div class="card">
+                <div class="card-body p-2 d-flex align-items-center justify-content-between">
+                    <div class="d-flex align-items-center">
+                        <i class="fas fa-eye me-2" style="color:#dc3545"></i>
+                        <div>
+                            <small class="text-muted d-block" style="font-size:0.7rem">Observers</small>
+                            <strong id="stat-observers">0</strong>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col">
+            <div class="card">
+                <div class="card-body p-2 d-flex align-items-center justify-content-between">
+                    <div class="d-flex align-items-center">
+                        <i class="fas fa-broadcast-tower me-2" style="color:#0d6efd"></i>
+                        <div>
+                            <small class="text-muted d-block" style="font-size:0.7rem">Nodes</small>
+                            <strong id="stat-nodes">0</strong>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Controls -->
+    <div class="row mb-2 g-2 align-items-center">
+        <div class="col-auto">
+            <select id="time-filter" class="form-select form-select-sm">
+                <option value="1">Last 24h</option>
+                <option value="7">Last 7 days</option>
+                <option value="30" selected>Last 30 days</option>
+                <option value="90">Last 90 days</option>
+                <option value="0">All time</option>
+            </select>
+        </div>
+        <div class="col-auto">
+            <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" id="toggle-observers" checked>
+                <label class="form-check-label" for="toggle-observers">
+                    <span class="legend-dot legend-observer"></span>Observers
+                </label>
+            </div>
+        </div>
+        <div class="col-auto">
+            <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" id="toggle-nodes" checked>
+                <label class="form-check-label" for="toggle-nodes">
+                    <span class="legend-dot legend-node"></span>Nodes
+                </label>
+            </div>
+        </div>
+    </div>
+
+    <!-- Map -->
+    <div class="row map-row">
+        <div class="col-12">
+            <div class="card discovery-card">
+                <div class="card-body p-0 position-relative" style="flex:1;display:flex;flex-direction:column;">
+                    <div id="discovery-map"></div>
+                    <!-- Legend -->
+                    <div class="legend-box">
+                        <div><span class="legend-dot legend-observer"></span> Observer position</div>
+                        <div><span class="legend-dot legend-node"></span> Discovered node</div>
+                        <div class="mt-1" style="font-size:0.75rem;color:var(--text-muted)">Size = signal strength</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Leaflet JS -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<script>
+(function() {
+    // Reverse geocode cache + sequential queue (Nominatim: max 1 req/sec)
+    var geoCache = {};
+    var geoQueue = [];
+    var geoRunning = false;
+
+    function reverseGeocode(lat, lon, callback) {
+        var key = lat.toFixed(4) + ',' + lon.toFixed(4);
+        if (geoCache[key]) { callback(geoCache[key]); return; }
+        geoQueue.push({lat: lat, lon: lon, key: key, cb: callback});
+        processGeoQueue();
+    }
+
+    function processGeoQueue() {
+        if (geoRunning || geoQueue.length === 0) return;
+        geoRunning = true;
+        var item = geoQueue.shift();
+        fetch('https://nominatim.openstreetmap.org/reverse?lat=' + item.lat + '&lon=' + item.lon + '&format=json&zoom=18')
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                var addr = data.address || {};
+                var parts = [];
+                // Street-level detail
+                if (addr.road) parts.push(addr.road);
+                else if (addr.neighbourhood) parts.push(addr.neighbourhood);
+                else if (addr.suburb) parts.push(addr.suburb);
+                // District/city for context
+                if (addr.suburb && addr.road) parts.push(addr.suburb);
+                else if (addr.city_district) parts.push(addr.city_district);
+                else if (addr.city || addr.town || addr.village) parts.push(addr.city || addr.town || addr.village);
+                var name = parts.length > 0 ? parts.join(', ') : (item.lat.toFixed(4) + ', ' + item.lon.toFixed(4));
+                geoCache[item.key] = name;
+                item.cb(name);
+            })
+            .catch(function() {
+                geoCache[item.key] = item.lat.toFixed(4) + ', ' + item.lon.toFixed(4);
+                item.cb(geoCache[item.key]);
+            })
+            .finally(function() {
+                geoRunning = false;
+                setTimeout(processGeoQueue, 1100);  // Nominatim rate limit: 1 req/sec
+            });
+    }
+
+    function snrColor(snr) {
+        if (snr < -4) return '#dc3545';
+        if (snr <= 4) return '#fd7e14';
+        return '#198754';
+    }
+
+    function snrMeter(snr) {
+        var color = snrColor(snr);
+        var on = snr < -4 ? 1 : (snr <= 4 ? 2 : 3);
+        var heights = [6, 10, 14];
+        var s = '<span style="display:inline-flex;align-items:flex-end;gap:1px;vertical-align:middle">';
+        for (var i = 0; i < 3; i++) {
+            var o = i < on ? '1' : '0.2';
+            s += '<span style="display:inline-block;width:3px;height:' + heights[i] + 'px;background:' + color + ';opacity:' + o + ';border-radius:1px"></span>';
+        }
+        return s + '</span>';
+    }
+
+    // Map setup
+    const map = L.map('discovery-map', {
+        zoomControl: true,
+        preferCanvas: true
+    }).setView([0, 0], 2);
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(map);
+
+    // Layer groups
+    const observerLayer = L.layerGroup().addTo(map);
+    const nodeLayer = L.layerGroup().addTo(map);
+    const linkLayer = L.layerGroup().addTo(map);
+
+    // Store links data and selected state
+    var currentLinks = [];
+    var selectedKey = null;
+
+    function coordKey(lat, lon) {
+        return lat.toFixed(4) + ',' + lon.toFixed(4);
+    }
+
+    function clearLinks() {
+        linkLayer.clearLayers();
+        selectedKey = null;
+    }
+
+    function showLinksForObserver(lat, lon) {
+        var key = coordKey(lat, lon);
+        if (selectedKey === 'obs:' + key) { clearLinks(); return; }
+        clearLinks();
+        selectedKey = 'obs:' + key;
+        currentLinks.forEach(function(l) {
+            if (coordKey(l.obs_lat, l.obs_lon) === key) {
+                L.polyline([[l.obs_lat, l.obs_lon], [l.node_lat, l.node_lon]], {
+                    color: '#dc3545', weight: 4, opacity: 0.7,
+                    dashArray: null
+                }).addTo(linkLayer);
+            }
+        });
+    }
+
+    function showLinksForNode(lat, lon) {
+        var key = coordKey(lat, lon);
+        if (selectedKey === 'node:' + key) { clearLinks(); return; }
+        clearLinks();
+        selectedKey = 'node:' + key;
+        currentLinks.forEach(function(l) {
+            if (coordKey(l.node_lat, l.node_lon) === key) {
+                L.polyline([[l.obs_lat, l.obs_lon], [l.node_lat, l.node_lon]], {
+                    color: '#0d6efd', weight: 4, opacity: 0.7,
+                    dashArray: null
+                }).addTo(linkLayer);
+            }
+        });
+    }
+
+    // Clear lines on map click (empty area)
+    map.on('click', clearLinks);
+
+    // Toggle handlers
+    document.getElementById('toggle-observers').addEventListener('change', function() {
+        if (this.checked) { map.addLayer(observerLayer); }
+        else { map.removeLayer(observerLayer); }
+    });
+    document.getElementById('toggle-nodes').addEventListener('change', function() {
+        if (this.checked) { map.addLayer(nodeLayer); }
+        else { map.removeLayer(nodeLayer); }
+    });
+
+    // Time filter
+    document.getElementById('time-filter').addEventListener('change', loadData);
+
+    function loadData() {
+        const days = document.getElementById('time-filter').value;
+        fetch('/api/discovery/heatmap?days=' + days)
+            .then(r => r.json())
+            .then(data => render(data))
+            .catch(err => console.error('Discovery heatmap fetch error:', err));
+    }
+
+    function render(data) {
+        observerLayer.clearLayers();
+        nodeLayer.clearLayers();
+        clearLinks();
+        currentLinks = data.links || [];
+
+        const bounds = [];
+
+        // Draw node markers (blue) - draw first so observers layer on top
+        (data.nodes || []).forEach(function(n) {
+            const snr = n.snr || 0;
+            const radius = Math.max(9, Math.min(20, 9 + (snr + 5) * 0.5));
+            const opacity = Math.max(0.6, Math.min(0.95, 0.6 + (snr + 5) * 0.02));
+            const marker = L.circleMarker([n.lat, n.lon], {
+                radius: radius,
+                fillColor: '#0d6efd',
+                color: '#ffffff',
+                weight: 2,
+                opacity: 1,
+                fillOpacity: opacity
+            });
+            var nodeLabel = n.name && n.name !== 'Unknown'
+                ? n.name + ' (' + n.pk + ')'
+                : n.pk || '?';
+            marker.bindTooltip(
+                '<b>' + nodeLabel + '</b><br>' +
+                'SNR: ' + n.snr + ' dB<br>' +
+                'Seen: ' + n.observation_count + 'x<br>' +
+                'Coords: ' + n.lat.toFixed(4) + ', ' + n.lon.toFixed(4),
+                { direction: 'top' }
+            );
+            marker.on('click', function(e) {
+                L.DomEvent.stopPropagation(e);
+                showLinksForNode(n.lat, n.lon);
+            });
+            marker.addTo(nodeLayer);
+            bounds.push([n.lat, n.lon]);
+        });
+
+        // Draw observer markers (red)
+        (data.observers || []).forEach(function(o) {
+            const avgSnr = o.avg_best_snr || 0;
+            const radius = Math.max(9, Math.min(20, 9 + avgSnr * 0.4));
+            const opacity = Math.max(0.6, Math.min(0.95, 0.6 + avgSnr * 0.02));
+            const marker = L.circleMarker([o.lat, o.lon], {
+                radius: radius,
+                fillColor: '#dc3545',
+                color: '#ffffff',
+                weight: 2,
+                opacity: 1,
+                fillOpacity: opacity
+            });
+            const ts = o.timestamp ? new Date(o.timestamp * 1000).toLocaleString() : 'N/A';
+            function setTooltip(label) {
+                marker.bindTooltip(
+                    '<b>' + label + '</b><br>' +
+                    'Avg nodes/session: <b>' + o.avg_nodes + '</b><br>' +
+                    'SNR: ' + snrMeter(avgSnr) + ' <b style="color:' + snrColor(avgSnr) + '">' + avgSnr.toFixed(1) + ' dB</b><br>' +
+                    'Sessions: <b>' + o.session_count + '</b><br>' +
+                    'Last seen: ' + ts,
+                    { direction: 'top' }
+                );
+            }
+            setTooltip(o.lat.toFixed(4) + ', ' + o.lon.toFixed(4));
+            reverseGeocode(o.lat, o.lon, function(name) { setTooltip(name); });
+            marker.on('click', function(e) {
+                L.DomEvent.stopPropagation(e);
+                showLinksForObserver(o.lat, o.lon);
+            });
+            marker.addTo(observerLayer);
+            bounds.push([o.lat, o.lon]);
+        });
+
+        // Update stats
+        const stats = data.stats || {};
+        document.getElementById('stat-sessions').textContent = stats.total_sessions || 0;
+        document.getElementById('stat-observers').textContent = stats.unique_observers || 0;
+        document.getElementById('stat-nodes').textContent = stats.unique_nodes || 0;
+
+        // Fit bounds
+        if (bounds.length > 0) {
+            map.fitBounds(bounds, { padding: [30, 30], maxZoom: 14 });
+        }
+    }
+
+    // Initial load
+    loadData();
+})();
+</script>
+{% endblock %}
