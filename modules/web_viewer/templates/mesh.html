@@ -1445,6 +1445,10 @@
                             <td style="padding: 2px 0;">${node.last_advert_timestamp ? new Date(node.last_advert_timestamp).toLocaleString() : 'Never'}</td>
                         </tr>
                         <tr>
+                            <td style="padding: 2px 8px 2px 0; color: #888;"><strong>Firmware:</strong></td>
+                            <td style="padding: 2px 0;">${node.firmware_version ? escapeHtml(node.firmware_version) : ''}</td>
+                        </tr>
+                        <tr>
                             <td style="padding: 2px 8px 2px 0; color: #888;"><strong>Connections:</strong></td>
                             <td style="padding: 2px 0;">${connections.length} total (${incoming} incoming, ${outgoing} outgoing)</td>
                         </tr>
@@ -2351,6 +2355,7 @@
                 <tr><th>Starred</th><td>${node.is_starred ? '<i class="fas fa-star text-warning"></i> Yes' : 'No'}</td></tr>
                 <tr><th>Last Heard</th><td>${node.last_heard || 'Never'}</td></tr>
                 <tr><th>Last Advert</th><td>${node.last_advert_timestamp || 'Never'}</td></tr>
+                <tr><th>Firmware</th><td>${node.firmware_version ? escapeHtml(node.firmware_version) : ''}</td></tr>
                 <tr><th>Connections</th><td>${connections.length} total (${incoming} incoming, ${outgoing} outgoing)</td></tr>
             </table>
         `;

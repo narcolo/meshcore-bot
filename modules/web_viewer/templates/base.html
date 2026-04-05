@@ -140,7 +140,12 @@
         
         .table-responsive {
             border-radius: 8px;
-            overflow: hidden;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        .table-responsive table {
+            white-space: nowrap;
         }
 
         /* Dark mode table styles */
@@ -391,6 +396,13 @@
                     <li class="nav-item">
                         <a class="nav-link" href="/feeds">
                             <i class="fas fa-rss"></i> Feeds
+                        </a>
+                    </li>
+                    {% endif %}
+                    {% if discovery_enabled %}
+                    <li class="nav-item">
+                        <a class="nav-link" href="/discovery">
+                            <i class="fas fa-binoculars"></i> Discovery
                         </a>
                     </li>
                     {% endif %}

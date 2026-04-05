@@ -171,12 +171,15 @@
                             <th class="sortable" data-sort="advert_count">
                                 Adverts <i class="fas fa-sort"></i>
                             </th>
+                            <th class="sortable" data-sort="firmware_version">
+                                Firmware <i class="fas fa-sort"></i>
+                            </th>
                             <th>Actions</th>
                         </tr>
                     </thead>
                         <tbody id="contacts-table-body">
                             <tr>
-                                <td colspan="11" class="text-center">
+                                <td colspan="12" class="text-center">
                                     <div class="loading">Loading contacts data...</div>
                                 </td>
                             </tr>
@@ -450,7 +453,7 @@ class ModernContactsManager {
                 'No contacts data available';
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="11" class="text-center text-muted">
+                    <td colspan="12" class="text-center text-muted">
                         ${message}
                     </td>
                 </tr>
@@ -478,6 +481,7 @@ class ModernContactsManager {
                 <td>${this.formatTimestamp(contact.first_heard)}</td>
                 <td>${this.formatTimeAgo(contact.last_seen)}</td>
                 <td><span class="badge bg-success">${contact.advert_count || 0}</span></td>
+                <td>${contact.firmware_version ? `<span class="badge bg-info">${contact.firmware_version}</span>` : '<span class="text-muted">-</span>'}</td>
                 <td>
                     <div class="btn-group" role="group">
                         ${contact.role && (contact.role.toLowerCase() === 'repeater' || contact.role.toLowerCase() === 'roomserver') ? 

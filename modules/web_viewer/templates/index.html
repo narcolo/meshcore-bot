@@ -611,7 +611,7 @@ class ModernDashboard {
             <div class="d-flex justify-content-between align-items-center mb-2">
                 <div class="d-flex align-items-center">
                     <span class="badge bg-primary me-2">${index + 1}</span>
-                    <span class="fw-bold text-truncate" style="max-width: 200px;" title="${channel.channel}">${channel.channel}</span>
+                    <a href="/messages?channel=${encodeURIComponent(channel.channel)}" class="fw-bold text-truncate text-decoration-none" style="max-width: 200px;" title="${channel.channel}">${channel.channel}</a>
                 </div>
                 <div class="text-end">
                     <span class="badge bg-secondary me-1">${channel.messages} msgs</span>
