@@ -6,7 +6,10 @@ Provides clean, family-friendly jokes from the JokeAPI
 
 import aiohttp
 import asyncio
+import json
 import logging
+import os
+import random
 from typing import Optional, Dict, Any, List
 from .base_command import BaseCommand
 from ..models import MeshMessage
@@ -62,7 +65,61 @@ class JokeCommand(BaseCommand):
             self.joke_enabled = self.get_config_value('Joke_Command', 'joke_enabled', fallback=True, value_type='bool')
         self.seasonal_jokes = self.get_config_value('Joke_Command', 'seasonal_jokes', fallback=True, value_type='bool')
         self.long_jokes = self.get_config_value('Joke_Command', 'long_jokes', fallback=False, value_type='bool')
+
+        # Load local jokes for non-English languages
+        self.local_jokes = None
+        self._load_local_jokes()
+
+        # Shuffle bags for no-repeat local joke rotation (keyed by 'single', 'twopart', 'all')
+        self._joke_bags = {}
     
+    def _load_local_jokes(self):
+        """Load local joke file for the configured language."""
+        lang = getattr(getattr(self.bot, 'translator', None), 'language', 'en')
+        if lang == 'en':
+            return
+        # Also try base language (e.g. 'pl' from 'pl-PL')
+        base_lang = lang.split('-')[0] if '-' in lang else lang
+        translation_path = self.get_config_value('Localization', 'translation_path', fallback='translations/')
+        for try_lang in [lang, base_lang]:
+            jokes_file = os.path.join(translation_path, f'jokes_{try_lang}.json')
+            if os.path.isfile(jokes_file):
+                try:
+                    with open(jokes_file, 'r', encoding='utf-8') as f:
+                        self.local_jokes = json.load(f)
+                    self.logger.info(f"Loaded local jokes from {jokes_file}")
+                    return
+                except Exception as e:
+                    self.logger.error(f"Error loading local jokes from {jokes_file}: {e}")
+
+    def _get_local_joke(self, joke_type: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """Get a joke from the local jokes pool using a shuffle-bag so all jokes
+        are shown before any can repeat.
+
+        Args:
+            joke_type: 'single' for one-liners only, 'twopart' for two-part only, None for any.
+        """
+        if not self.local_jokes:
+            return None
+
+        bag_key = joke_type or 'all'
+
+        # Refill the bag when empty or missing
+        if not self._joke_bags.get(bag_key):
+            pool = []
+            if joke_type != 'twopart':
+                for joke in self.local_jokes.get('single', []):
+                    pool.append({'type': 'single', 'joke': joke})
+            if joke_type != 'single':
+                for joke in self.local_jokes.get('twopart', []):
+                    pool.append({'type': 'twopart', 'setup': joke['setup'], 'delivery': joke['delivery']})
+            if not pool:
+                return None
+            random.shuffle(pool)
+            self._joke_bags[bag_key] = pool
+
+        return self._joke_bags[bag_key].pop()
+
     def get_help_text(self, message: MeshMessage = None) -> str:
         """Get help text, excluding dark category if not in DM"""
         if message and not message.is_dm:
@@ -154,27 +211,40 @@ class JokeCommand(BaseCommand):
             bool: True if executed successfully, False otherwise.
         """
         content = message.content.strip()
-        
+
         # Parse the command to extract category
         parts = content.split()
-        if len(parts) < 2:
-            # No category specified, check for seasonal defaults
+
+        # Local joke type filters (checked before API category validation)
+        local_type_map = {'short': 'single', 'krotki': 'single', 'krótki': 'single',
+                          'long': 'twopart', 'dlugi': 'twopart', 'długi': 'twopart'}
+        local_type = local_type_map.get(parts[1].lower()) if len(parts) >= 2 else None
+
+        if len(parts) < 2 or local_type is not None:
+            # No category specified (or local type filter), check for seasonal defaults
             category = self.get_seasonal_default()
         else:
             # Category specified
             category_input = parts[1].lower()
             category = self.SUPPORTED_CATEGORIES.get(category_input)
-            
+
             if category is None:
                 # Invalid category
                 categories = ", ".join(self.SUPPORTED_CATEGORIES.keys())
                 await self.send_response(message, f"Invalid category. Available categories: {categories}")
                 return True
-        
+
         try:
             # Record execution for this user
             self.record_execution(message.sender_id)
-            
+
+            # Use local jokes for non-English languages
+            if self.local_jokes and (category is None or local_type is not None):
+                joke_data = self._get_local_joke(joke_type=local_type)
+                if joke_data:
+                    await self.send_joke_with_length_handling(message, joke_data)
+                    return True
+
             # Get joke from API with length handling
             joke_data = await self.get_joke_with_length_handling(category)
             
