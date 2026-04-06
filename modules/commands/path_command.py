@@ -1713,9 +1713,10 @@ class PathCommand(BaseCommand):
         """Send path response, splitting into multiple messages if necessary"""
         # Prepend sender name (and optional phrase) as header lines
         sender = message.sender_id or self.translate('common.unknown_sender')
-        header = sender + ":"
         if phrase:
-            header += "\n" + phrase
+            header = f"@[{sender}] {phrase}:"
+        else:
+            header = f"@[{sender}]:"
         response = header + "\n" + response
 
         # Store the complete response for web viewer integration BEFORE splitting
