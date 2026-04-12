@@ -1016,6 +1016,11 @@
     },
     "cmd": {
       "description": "List available commands"
+    },
+    "routing_hint": {
+      "description": "Notifies Public-channel users transmitting with 1-byte routing to switch to 2-byte",
+      "hint_part1": "Hi @[{name}], your node uses 1-byte routing. Please switch to 2-byte.",
+      "hint_part2": "Main screen -> gear -> Experimental settings -> Default Path Hash Size -> 2-byte"
     }
   },
   "elapsed": {

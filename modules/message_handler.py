@@ -2653,10 +2653,24 @@ class MessageHandler:
                 except Exception as e:
                     self.logger.error(f"Error executing greeter command: {e}")
         
+        # Check routing_hint command for public channel messages (BEFORE general message filtering)
+        # This allows the hint to fire even if the channel is not in monitor_channels
+        if 'routing_hint' in self.bot.command_manager.commands:
+            routing_hint_command = self.bot.command_manager.commands['routing_hint']
+            if routing_hint_command and routing_hint_command.should_execute(message):
+                try:
+                    success = await routing_hint_command.execute(message)
+                    if 'stats' in self.bot.command_manager.commands:
+                        stats_command = self.bot.command_manager.commands['stats']
+                        if stats_command:
+                            stats_command.record_command(message, 'routing_hint', success)
+                except Exception as e:
+                    self.logger.error(f"Error executing routing_hint command: {e}")
+
         # Now check if we should process this message for bot responses
         if not self.should_process_message(message):
             return
-        
+
         self.logger.info(f"Processing message: {message.content}")
         
         # Check for advert command (DM only)

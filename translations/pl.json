@@ -923,6 +923,11 @@
     },
     "cmd": {
       "description": "Lista dostępnych komend"
+    },
+    "routing_hint": {
+      "description": "Powiadamia użytkowników kanału Public o routingu 1-bajtowym i prosi o zmianę na 2-bajtowy",
+      "hint_part1": "Hej @[{name}], twój węzeł używa routingu 1-bajtowego. Zmień na 2-bajtowy.",
+      "hint_part2": "Ekran główny -> zębatka -> Experimental settings -> Default Path Hash Size -> 2-byte"
     }
   },
   "errors": {
