@@ -353,12 +353,14 @@ class HelloCommand(BaseCommand):
             greeting_pool = evening_greetings + greeting_openings
         
         opening = random.choice(greeting_pool)
-        descriptor = random.choice(human_descriptors)
-        
-        # Add some variety in punctuation and formatting
         punctuation_options = ["!", ".", "!", "!", "!"]  # Favor exclamation marks
         punctuation = random.choice(punctuation_options)
-        
+
+        # Night greetings are complete sentences — return them as-is without a descriptor
+        if force_evening:
+            return f"{opening}{punctuation}"
+
+        descriptor = random.choice(human_descriptors)
         # Sometimes add a comma, sometimes not
         if random.choice([True, False]):
             return f"{opening}, {descriptor}{punctuation}"
