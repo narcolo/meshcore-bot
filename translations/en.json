@@ -890,6 +890,7 @@
         "Welcome", "Nice to see you", "Pleasure to meet you", "Good to see you",
         "Long time no see", "Fancy meeting you here"
       ],
+      "night_keywords": ["good night", "goodnight", "gnight", "nite", "buenas noches", "bonne nuit"],
       "morning_greetings": [
         "Good morning", "Top o' the morning", "Buenos dias", "Bonjour",
         "Guten morgen", "Buongiorno", "Bom dia", "Dobro jutro", "Dobroye utro",

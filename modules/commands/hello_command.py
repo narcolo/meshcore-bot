@@ -223,7 +223,7 @@ class HelloCommand(BaseCommand):
     
     def get_evening_greetings(self) -> List[str]:
         """Get evening greetings from translations or fallback.
-        
+
         Returns:
             List[str]: A list of evening greeting strings.
         """
@@ -231,6 +231,18 @@ class HelloCommand(BaseCommand):
         if greetings and isinstance(greetings, list) and len(greetings) > 0:
             return greetings
         return self.evening_greetings_fallback
+
+    def get_night_keywords(self) -> List[str]:
+        """Get night trigger keywords from translations or fallback."""
+        keywords = self.translate_get_value('commands.hello.night_keywords')
+        if keywords and isinstance(keywords, list):
+            return [k.lower() for k in keywords]
+        return ["good night", "goodnight", "gnight", "nite"]
+
+    def is_night_trigger(self, content: str) -> bool:
+        """Return True if the message content matches a night keyword."""
+        content_lower = content.strip().lower()
+        return any(content_lower == kw or content_lower.startswith(kw) for kw in self.get_night_keywords())
     
     def get_human_descriptors(self) -> List[str]:
         """Get human descriptors from translations or fallback.
@@ -283,47 +295,55 @@ class HelloCommand(BaseCommand):
     
     async def execute(self, message: MeshMessage) -> bool:
         """Execute the hello command.
-        
+
         Args:
             message: The message triggering the command.
-            
+
         Returns:
             bool: True if executed successfully, False otherwise.
         """
         # Get bot name from config
         bot_name = self.bot.config.get('Bot', 'bot_name', fallback='Bot')
-        
+
         # Strip mentions from content for processing
         content = self._strip_mentions(message.content)
-        
+
         # Check if message is emoji-only (after stripping mentions)
         if self.is_emoji_only_message(content):
             response = self.get_emoji_response(content, bot_name)
         else:
-            # Get random robot greeting
-            random_greeting = self.get_random_greeting()
+            # Force evening pool when the trigger word is a night greeting (e.g. "dobranoc")
+            force_evening = self.is_night_trigger(content)
+            random_greeting = self.get_random_greeting(force_evening=force_evening)
             response_format = self.translate('commands.hello.response_format')
             response = f"{random_greeting} {response_format}".format(bot_name=bot_name)
-        
+
         return await self.send_response(message, response)
     
-    def get_random_greeting(self) -> str:
-        """Generate a random robot greeting by combining opening and descriptor"""
+    def get_random_greeting(self, force_evening: bool = False) -> str:
+        """Generate a random robot greeting by combining opening and descriptor.
+
+        Args:
+            force_evening: If True, always use the evening pool regardless of time.
+                           Use when the trigger word itself is a night greeting.
+        """
         tz, _ = get_config_timezone(self.bot.config, self.logger)
         current_time = datetime.datetime.now(tz)
-        
+
         # Get current hour to determine time of day
         current_hour = current_time.hour
-        
+
         # Get greeting arrays from translations or fallback
         greeting_openings = self.get_greeting_openings()
         morning_greetings = self.get_morning_greetings()
         afternoon_greetings = self.get_afternoon_greetings()
         evening_greetings = self.get_evening_greetings()
         human_descriptors = self.get_human_descriptors()
-        
-        # Choose appropriate greeting based on time of day
-        if 5 <= current_hour < 12:  # Morning (5 AM - 12 PM)
+
+        # Choose appropriate greeting based on time of day (or forced pool)
+        if force_evening:
+            greeting_pool = evening_greetings
+        elif 5 <= current_hour < 12:  # Morning (5 AM - 12 PM)
             greeting_pool = morning_greetings + greeting_openings
         elif 12 <= current_hour < 17:  # Afternoon (12 PM - 5 PM)
             greeting_pool = afternoon_greetings + greeting_openings

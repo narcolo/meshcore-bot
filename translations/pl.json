@@ -797,6 +797,7 @@
         "Welcome", "Nice to see you", "Pleasure to meet you", "Good to see you",
         "Long time no see", "Fancy meeting you here", "Cześć"
       ],
+      "night_keywords": ["dobranoc", "dobrej nocy", "dobra noc", "good night", "noc", "na noc", "spac", "spać"],
       "morning_greetings": [
         "Dzień dobry",
         "No, wstałeś w końcu",
@@ -821,14 +822,17 @@
       ],
       "evening_greetings": [
         "Dobry wieczór",
+        "Dobranoc",
         "Dobranoc wcześniaku",
+        "Dobranoc, jeśli w ogóle zamierzasz spać",
         "O tej porze jeszcze na nogach",
         "Nocny marku, hej",
         "Nie śpisz jeszcze? Dziwne",
         "Wieczorny emisariuszu siatki",
         "Późno się kręcisz",
         "Na noc na meshu — poświęcenie godne podziwu",
-        "Dobry wieczór, o ile coś w nim dobrego"
+        "Dobry wieczór, o ile coś w nim dobrego",
+        "Idź spać już"
       ],
       "human_descriptors": [
         "human", "carbon-based lifeform", "organic entity", "biological unit",
