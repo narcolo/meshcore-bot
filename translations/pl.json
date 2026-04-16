@@ -798,19 +798,37 @@
         "Long time no see", "Fancy meeting you here", "Cześć"
       ],
       "morning_greetings": [
-        "Good morning", "Top o' the morning", "Buenos dias", "Bonjour",
-        "Guten morgen", "Buongiorno", "Bom dia", "Dobro jutro", "Dobroye utro",
-        "Selamat pagi", "Ohayou gozaimasu", "Sabah al-khair", "Boker tov", "Dzień dobry"
+        "Dzień dobry",
+        "No, wstałeś w końcu",
+        "O, żyjesz",
+        "Pobudka",
+        "Witaj w świecie żywych",
+        "No to hej",
+        "Już nie śpisz? Szacun",
+        "Rano wstajesz — nieźle",
+        "Dzień dobry, jeśli coś w tym dobrego",
+        "O tej porze już na nogach"
       ],
       "afternoon_greetings": [
-        "Good afternoon", "Buenas tardes", "Boa tarde", "Dobro dan",
-        "Dobryy den", "Selamat siang", "Konnichiwa", "Ahlan bi-nahar",
-        "Tzoharaim tovim", "Dzień dobry"
+        "Dzień dobry dla tych co wstali po dziesiątej",
+        "W sam raz na obiad",
+        "Połowa dnia za nami, nie ma co świętować",
+        "No hej, w końcu się pojawiłeś",
+        "Jeszcze żyjesz? Nieźle",
+        "O, pojawiłeś się",
+        "Południe już minęło, ale co tam",
+        "Dzień dobry — albo raczej po południu"
       ],
       "evening_greetings": [
-        "Good evening", "Buenas noches", "Boa noite", "Dobro veče",
-        "Dobryy vecher", "Selamat malam", "Konbanwa", "Ahlan bi-layl",
-        "Erev tov", "Dobry wieczór"
+        "Dobry wieczór",
+        "Dobranoc wcześniaku",
+        "O tej porze jeszcze na nogach",
+        "Nocny marku, hej",
+        "Nie śpisz jeszcze? Dziwne",
+        "Wieczorny emisariuszu siatki",
+        "Późno się kręcisz",
+        "Na noc na meshu — poświęcenie godne podziwu",
+        "Dobry wieczór, o ile coś w nim dobrego"
       ],
       "human_descriptors": [
         "human", "carbon-based lifeform", "organic entity", "biological unit",
