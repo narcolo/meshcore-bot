@@ -24,7 +24,7 @@
     "dadjoke": ["dadjoke", "dad joke", "dadjokes", "dad jokes"],
     "catfact": ["catfact", "cat", "meow", "purr", "kitten", "kot"],
     "hacker": ["hacker", "sudo", "ps aux", "grep", "ls -l", "ls -la", "echo $PATH"],
-    "hello": ["hello", "hi", "hey", "howdy", "greetings", "salutations", "good morning", "good afternoon", "good evening", "good night", "yo", "sup", "whats up", "what's up", "morning", "afternoon", "evening", "night", "gday", "g'day", "hola", "bonjour", "ciao", "namaste", "aloha", "shalom", "konnichiwa", "guten tag", "buenos dias", "buenas tardes", "buenas noches", "czesc", "cześć"],
+    "hello": ["hello", "hi", "hey", "howdy", "greetings", "salutations", "good morning", "good afternoon", "good evening", "good night", "yo", "sup", "whats up", "what's up", "morning", "afternoon", "evening", "night", "gday", "g'day", "hola", "bonjour", "ciao", "namaste", "aloha", "shalom", "konnichiwa", "guten tag", "buenos dias", "buenas tardes", "buenas noches", "czesc", "cześć", "dzień dobry", "dzien dobry", "dobry wieczór", "dobry wieczor", "dobranoc", "dobry", "siema", "hej"],
     "webviewer": ["webviewer", "web", "viewer", "wv"],
     "cmd": ["cmd", "commands", "komendy"],
     "advert": ["advert"],
