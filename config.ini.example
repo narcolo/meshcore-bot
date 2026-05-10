@@ -622,8 +622,13 @@ emergency.hamradio = Amateur radio emergency net
 enabled = true
 
 # Default teams to show when 'sports' command is used without arguments
-# Comma-separated list of team names (use lowercase)
-teams = seahawks,mariners,sounders,kraken
+# Comma-separated list of team names or league names (use lowercase)
+# A single league name fetches the full schedule in one query (recommended)
+teams = ekstraklasa
+
+# Cache TTL for TheSportsDB API results in seconds (default: 86400 = 24h)
+# Set to 0 to disable caching
+# thesportsdb_cache_ttl = 86400
 
 # Channels where sports command is allowed
 # IMPORTANT: Leave commented out (or omit entirely) to use global monitor_channels (default behavior)

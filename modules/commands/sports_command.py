@@ -38,7 +38,7 @@ class SportsCommand(BaseCommand):
     
     # Plugin metadata
     name = "sports"
-    keywords = ['sports', 'score', 'scores']
+    keywords = ['sports', 'sport', 'score', 'scores', 'wyniki', 'mecz', 'mecze']
     description = "Get sports scores and schedules (usage: sports [team/league])"
     category = "sports"
     cooldown_seconds = 3  # 3 second cooldown per user to prevent API abuse
@@ -75,8 +75,9 @@ class SportsCommand(BaseCommand):
             self.sports_enabled = self.get_config_value('Sports_Command', 'sports_enabled', fallback=True, value_type='bool')
 
         # Initialize API clients
+        cache_ttl = self.get_config_value('Sports_Command', 'thesportsdb_cache_ttl', fallback=86400, value_type='int')
         self.espn_client = ESPNClient(logger=self.logger, timeout=self.url_timeout)
-        self.thesportsdb_client = TheSportsDBClient(logger=self.logger)
+        self.thesportsdb_client = TheSportsDBClient(logger=self.logger, cache_ttl=cache_ttl)
 
         # Load default teams from config
         self.default_teams = self.load_default_teams()
@@ -145,13 +146,24 @@ class SportsCommand(BaseCommand):
     
     
     async def get_default_teams_scores(self) -> str:
-        """Get scores for default teams, sorted by game time"""
+        """Get scores for default teams or leagues, sorted by game time"""
         if not self.default_teams:
             return self.translate('commands.sports.no_default_teams')
-        
+
+        # If a single default entry is a league, delegate directly to league scores
+        if len(self.default_teams) == 1:
+            league_info = self.get_league_info(self.default_teams[0])
+            if league_info:
+                return await self.get_league_scores(league_info)
+
         game_data = []
         for team in self.default_teams:
             try:
+                # Check league first, then team
+                league_info = self.get_league_info(team)
+                if league_info:
+                    scores = await self.get_league_scores(league_info)
+                    return scores
                 team_info = TEAM_MAPPINGS.get(team)
                 if team_info:
                     # Get all relevant games for this team (live, past within 8 days, upcoming within 6 weeks)
@@ -276,6 +288,7 @@ class SportsCommand(BaseCommand):
             'anaheim': ['ducks', 'angels'],
             'austin': ['austin fc'],
             'atx': ['austin fc'],
+            'białystok': ['jagiellonia']
         }
         
         # Get team names for this city
@@ -426,9 +439,15 @@ class SportsCommand(BaseCommand):
     async def get_team_scores(self, team_name: str) -> str:
         """Get scores for a specific team or league"""
         # Check if this is a schedule query (team_name ends with " schedule")
-        is_schedule_query = team_name.endswith(' schedule')
+        is_schedule_query = team_name.endswith(' schedule') or team_name.endswith(' rozkład')  # Support both English and Polish "schedule" suffixes
         if is_schedule_query:
-            team_name_clean = team_name[:-9].strip()  # Remove " schedule"
+            # Remove " schedule" or " rozkład" suffix (support both English and Polish, case-insensitive)
+            suffixes = [" schedule", " rozkład"]
+            team_name_clean = team_name
+            for suffix in suffixes:
+                if team_name_clean.lower().endswith(suffix):
+                    team_name_clean = team_name_clean[: -len(suffix)].strip()
+                    break
             
             # First check if it's a league query
             league_info = self.get_league_info(team_name_clean)

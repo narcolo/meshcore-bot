@@ -11,7 +11,7 @@
     "moon": ["moon","ksiezyc"],
     "hfcond": ["hfcond", "hf"],
     "satpass": ["satpass"],
-    "sports": ["sports", "score", "scores"],
+    "sports": ["sports", "sport", "score", "scores", "wyniki", "mecz", "mecze"],
     "stats": ["stats"],
     "channels": ["channels", "channel","kanaly", "kanały"],
     "path": ["path", "decode", "route", "sciezka", "ścieżka"],
