@@ -38,7 +38,7 @@ class SportsCommand(BaseCommand):
     
     # Plugin metadata
     name = "sports"
-    keywords = ['sports', 'score', 'scores']
+    keywords = ['sports', 'sport', 'score', 'scores', 'wyniki', 'mecz', 'mecze']
     description = "Get sports scores and schedules (usage: sports [team/league])"
     category = "sports"
     cooldown_seconds = 3  # 3 second cooldown per user to prevent API abuse
