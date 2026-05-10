@@ -3,31 +3,35 @@ import asyncio
 import time
 import logging
 from datetime import datetime, timezone
-from typing import List, Dict, Optional
+from typing import Any, List, Dict, Optional, Tuple
 from .sports_mappings import (
-    get_team_abbreviation_from_name, format_clean_date, 
+    get_team_abbreviation_from_name, format_clean_date,
     format_clean_date_time, is_soccer
 )
 
 class TheSportsDBClient:
     """Client for TheSportsDB API with rate limiting and parsing logic"""
-    
+
     BASE_URL = "https://www.thesportsdb.com/api/v1/json"
     FREE_API_KEY = "123"  # Free public API key
-    
-    def __init__(self, logger: Optional[logging.Logger] = None, timeout: int = 10, session: Optional[aiohttp.ClientSession] = None):
+
+    def __init__(self, logger: Optional[logging.Logger] = None, timeout: int = 10,
+                 session: Optional[aiohttp.ClientSession] = None, cache_ttl: int = 86400):
         """Initialize the TheSportsDB API client with rate limiting.
 
         Args:
             logger: Logger instance for error and info logging. If None, creates a default logger.
             timeout: Request timeout in seconds (default: 10)
             session: Optional existing aiohttp session to reuse. If None, creates new sessions as needed.
+            cache_ttl: Cache TTL in seconds (default: 86400 = 24h). Set to 0 to disable.
         """
         self.logger = logger or logging.getLogger(__name__)
         self.timeout = aiohttp.ClientTimeout(total=timeout)
         self.session = session
         self.last_request_time = 0
         self.min_request_interval = 2.1  # Slightly more than 2 seconds for safety
+        self.cache_ttl = cache_ttl
+        self._cache: Dict[str, Tuple[float, Any]] = {}
 
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or create an aiohttp session"""
@@ -43,6 +47,19 @@ class TheSportsDBClient:
             sleep_time = self.min_request_interval - time_since_last
             await asyncio.sleep(sleep_time)
         self.last_request_time = time.time()
+
+    def _cache_get(self, key: str) -> Optional[Any]:
+        if self.cache_ttl <= 0 or key not in self._cache:
+            return None
+        ts, value = self._cache[key]
+        if time.time() - ts > self.cache_ttl:
+            del self._cache[key]
+            return None
+        return value
+
+    def _cache_set(self, key: str, value: Any) -> None:
+        if self.cache_ttl > 0:
+            self._cache[key] = (time.time(), value)
 
     async def search_team(self, team_name: str) -> Optional[Dict]:
         """Search for a team by name"""
@@ -94,36 +111,48 @@ class TheSportsDBClient:
 
     async def fetch_team_games(self, sport: str, league: str, team_id: str) -> List[Dict]:
         """Fetch and parse team games (last and next)"""
+        cache_key = f"team_games:{team_id}"
+        cached = self._cache_get(cache_key)
+        if cached is not None:
+            self.logger.debug(f"Cache hit: {cache_key}")
+            return cached
+
         last_events_task = self.get_team_events_last(team_id, limit=5)
         next_events_task = self.get_team_events_next(team_id, limit=5)
-        
+
         last_events, next_events = await asyncio.gather(last_events_task, next_events_task)
-        
+
         all_games = []
-        # Parse last events (completed games)
         for event in last_events:
             game_data = self.parse_event(event, team_id, sport, league)
             if game_data:
                 all_games.append(game_data)
-        
-        # Parse next events (upcoming games)
+
         for event in next_events:
             game_data = self.parse_event(event, team_id, sport, league)
             if game_data:
                 all_games.append(game_data)
-        
+
+        self._cache_set(cache_key, all_games)
         return all_games
 
     async def fetch_team_schedule(self, sport: str, league: str, team_id: str) -> List[Dict]:
         """Fetch upcoming scheduled games for a team"""
+        cache_key = f"team_schedule:{team_id}"
+        cached = self._cache_get(cache_key)
+        if cached is not None:
+            self.logger.debug(f"Cache hit: {cache_key}")
+            return cached
+
         next_events = await self.get_team_events_next(team_id, limit=10)
-        
+
         upcoming_games = []
         for event in next_events:
             game_data = self.parse_event(event, team_id, sport, league)
             if game_data:
                 upcoming_games.append(game_data)
-        
+
+        self._cache_set(cache_key, upcoming_games)
         return upcoming_games
 
     def parse_event(self, event: Dict, team_id: str, sport: str, league: str) -> Optional[Dict]:
@@ -287,8 +316,14 @@ class TheSportsDBClient:
 
     async def fetch_league_scores(self, sport: str, league_name: str, league_id: str) -> List[Dict]:
         """Fetch and parse league scores from multiple sources"""
+        cache_key = f"league_scores:{league_id}"
+        cached = self._cache_get(cache_key)
+        if cached is not None:
+            self.logger.debug(f"Cache hit: {cache_key}")
+            return cached
+
         from datetime import timedelta
-        
+
         # Get today's date and next few days
         today = datetime.now().date()
         date_strings = [today.strftime('%Y-%m-%d')]
@@ -324,5 +359,6 @@ class TheSportsDBClient:
         add_parsed(past_events)
         for day_events in day_events_list:
             add_parsed(day_events)
-            
+
+        self._cache_set(cache_key, all_event_data)
         return all_event_data
