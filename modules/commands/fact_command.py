@@ -18,7 +18,7 @@ class FactCommand(BaseCommand):
 
     # Plugin metadata
     name = "fact"
-    keywords = ['fact', 'facts']
+    keywords = ['fact', 'facts', 'fakt', 'fakty']
     description = "Get a random interesting fact (usage: fact [category])"
     category = "fun"
     cooldown_seconds = 3
