@@ -1,12 +1,11 @@
-import aiohttp
 import asyncio
-import time
 import logging
+import time
 from datetime import datetime, timezone
-from typing import Any, List, Dict, Optional, Tuple
+import aiohttp
+from typing import Any, Dict, List, Optional, Tuple
 from .sports_mappings import (
-    get_team_abbreviation_from_name, format_clean_date,
-    format_clean_date_time, is_soccer
+    format_clean_date, format_clean_date_time, get_team_abbreviation_from_name, is_soccer
 )
 
 class TheSportsDBClient:
@@ -77,7 +76,7 @@ class TheSportsDBClient:
             self.logger.error(f"TheSportsDB search_team error: {e}")
             return None
 
-    async def get_team_events_last(self, team_id: str, limit: int = 5) -> List[Dict]:
+    async def get_team_events_last(self, team_id: str, limit: int = 5) -> list[dict]:
         """Get last N events for a team"""
         await self._rate_limit()
         url = f"{self.BASE_URL}/{self.FREE_API_KEY}/eventslast.php"
@@ -93,7 +92,7 @@ class TheSportsDBClient:
             self.logger.error(f"TheSportsDB get_team_events_last error: {e}")
             return []
 
-    async def get_team_events_next(self, team_id: str, limit: int = 5) -> List[Dict]:
+    async def get_team_events_next(self, team_id: str, limit: int = 5) -> list[dict]:
         """Get next N events for a team"""
         await self._rate_limit()
         url = f"{self.BASE_URL}/{self.FREE_API_KEY}/eventsnext.php"
@@ -109,7 +108,7 @@ class TheSportsDBClient:
             self.logger.error(f"TheSportsDB get_team_events_next error: {e}")
             return []
 
-    async def fetch_team_games(self, sport: str, league: str, team_id: str) -> List[Dict]:
+    async def fetch_team_games(self, sport: str, league: str, team_id: str) -> list[dict]:
         """Fetch and parse team games (last and next)"""
         cache_key = f"team_games:{team_id}"
         cached = self._cache_get(cache_key)
@@ -128,6 +127,7 @@ class TheSportsDBClient:
             if game_data:
                 all_games.append(game_data)
 
+        # Parse next events (upcoming games)
         for event in next_events:
             game_data = self.parse_event(event, team_id, sport, league)
             if game_data:
@@ -136,7 +136,7 @@ class TheSportsDBClient:
         self._cache_set(cache_key, all_games)
         return all_games
 
-    async def fetch_team_schedule(self, sport: str, league: str, team_id: str) -> List[Dict]:
+    async def fetch_team_schedule(self, sport: str, league: str, team_id: str) -> list[dict]:
         """Fetch upcoming scheduled games for a team"""
         cache_key = f"team_schedule:{team_id}"
         cached = self._cache_get(cache_key)
@@ -155,7 +155,7 @@ class TheSportsDBClient:
         self._cache_set(cache_key, upcoming_games)
         return upcoming_games
 
-    def parse_event(self, event: Dict, team_id: str, sport: str, league: str) -> Optional[Dict]:
+    def parse_event(self, event: dict, team_id: str, sport: str, league: str) -> Optional[dict]:
         """Parse a TheSportsDB event and return structured data with timestamp for sorting"""
         try:
             # Extract team info
@@ -167,19 +167,19 @@ class TheSportsDBClient:
             timestamp_str = event.get('strTimestamp', '')
             date_str = event.get('dateEvent', '')
             time_str = event.get('strTime', '')
-            
+
             # Determine if our team is home or away
             our_team_id = str(team_id)
             event_home_id = str(event.get('idHomeTeam', ''))
             is_home = (event_home_id == our_team_id)
-            
+
             # Get team abbreviations
             home_abbr = get_team_abbreviation_from_name(home_team)
             away_abbr = get_team_abbreviation_from_name(away_team)
-            
+
             # Get timestamp for sorting
-            timestamp = 0
-            event_timestamp = None
+            timestamp: float = 0
+            event_timestamp: Optional[float] = None
             if timestamp_str:
                 try:
                     # fromisoformat handles 'Z' in Python 3.11+, but we force UTC if naive
@@ -197,7 +197,7 @@ class TheSportsDBClient:
                             event_timestamp = dt.timestamp()
                             timestamp = event_timestamp
                         except: pass
-            
+
             formatted = ""
             if status == 'Match Finished':
                 date_suffix = ""
@@ -205,7 +205,7 @@ class TheSportsDBClient:
                     dt = datetime.fromtimestamp(event_timestamp, tz=timezone.utc).astimezone()
                     if dt.date() != datetime.now().date():
                         date_suffix = f", {format_clean_date(dt)}"
-                
+
                 if home_score and away_score:
                     if is_soccer(sport):
                         formatted = f"@{home_abbr} {home_score}-{away_score} {away_abbr} (F{date_suffix})"
@@ -234,7 +234,7 @@ class TheSportsDBClient:
                     else:
                         formatted = f"{away_abbr} @ {home_abbr} (TBD)"
                     timestamp = 9999999999
-            
+
             return {
                 'id': event.get('idEvent'),
                 'timestamp': timestamp,
@@ -247,7 +247,7 @@ class TheSportsDBClient:
         except Exception as e:
             self.logger.error(f"Error parsing TheSportsDB event {event.get('idEvent')}: {e}")
             return None
-    async def get_league_teams(self, league_id: str) -> List[Dict]:
+    async def get_league_teams(self, league_id: str) -> list[dict]:
         """Get all teams in a league"""
         await self._rate_limit()
         url = f"{self.BASE_URL}/{self.FREE_API_KEY}/lookup_all_teams.php"
@@ -263,7 +263,7 @@ class TheSportsDBClient:
             self.logger.error(f"TheSportsDB get_league_teams error: {e}")
             return []
 
-    async def get_league_events_next(self, league_id: str, limit: int = 10) -> List[Dict]:
+    async def get_league_events_next(self, league_id: str, limit: int = 10) -> list[dict]:
         """Get next N events for a league"""
         await self._rate_limit()
         url = f"{self.BASE_URL}/{self.FREE_API_KEY}/eventsnextleague.php"
@@ -279,7 +279,7 @@ class TheSportsDBClient:
             self.logger.error(f"TheSportsDB get_league_events_next error: {e}")
             return []
 
-    async def get_league_events_past(self, league_id: str, limit: int = 10) -> List[Dict]:
+    async def get_league_events_past(self, league_id: str, limit: int = 10) -> list[dict]:
         """Get past N events for a league"""
         await self._rate_limit()
         url = f"{self.BASE_URL}/{self.FREE_API_KEY}/eventspastleague.php"
@@ -295,7 +295,7 @@ class TheSportsDBClient:
             self.logger.error(f"TheSportsDB get_league_events_past error: {e}")
             return []
 
-    async def get_events_by_day(self, date_str: str, league_id: str = None) -> List[Dict]:
+    async def get_events_by_day(self, date_str: str, league_id: Optional[str] = None) -> list[dict]:
         """Get events for a specific day"""
         await self._rate_limit()
         url = f"{self.BASE_URL}/{self.FREE_API_KEY}/eventsday.php"
@@ -314,7 +314,7 @@ class TheSportsDBClient:
             self.logger.error(f"TheSportsDB get_events_by_day error: {e}")
             return []
 
-    async def fetch_league_scores(self, sport: str, league_name: str, league_id: str) -> List[Dict]:
+    async def fetch_league_scores(self, sport: str, league_name: str, league_id: str) -> list[dict]:
         """Fetch and parse league scores from multiple sources"""
         cache_key = f"league_scores:{league_id}"
         cached = self._cache_get(cache_key)
@@ -329,22 +329,22 @@ class TheSportsDBClient:
         date_strings = [today.strftime('%Y-%m-%d')]
         for i in range(1, 7):  # Next 6 days
             date_strings.append((today + timedelta(days=i)).strftime('%Y-%m-%d'))
-        
+
         # Fetch events from multiple sources in parallel
         next_events_task = self.get_league_events_next(league_id, limit=15)
         past_events_task = self.get_league_events_past(league_id, limit=5)
         day_events_tasks = [self.get_events_by_day(d, league_id) for d in date_strings]
-        
+
         # Wait for all requests
         results = await asyncio.gather(next_events_task, past_events_task, *day_events_tasks)
         next_events = results[0]
         past_events = results[1]
         day_events_list = results[2:]
-        
+
         # Combine and parse
         all_event_data = []
         seen_event_ids = set()
-        
+
         # Helper to add parsed events
         def add_parsed(events):
             for event in events:
@@ -354,7 +354,7 @@ class TheSportsDBClient:
                     if parsed:
                         all_event_data.append(parsed)
                         seen_event_ids.add(event_id)
-        
+
         add_parsed(next_events)
         add_parsed(past_events)
         for day_events in day_events_list:
