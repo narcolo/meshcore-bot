@@ -4,6 +4,7 @@ Mention command for MeshCore Bot
 Responds in Bender style when the bot is called by name with no other content
 """
 
+import re
 import random
 from typing import Any, List
 from .base_command import BaseCommand
@@ -64,18 +65,36 @@ class MentionCommand(BaseCommand):
         super().__init__(bot)
         self.enabled = self.get_config_value('Mention_Command', 'enabled', fallback=True, value_type='bool')
 
+    def _plain_bot_name(self) -> str:
+        """Bot name stripped of emoji/symbols for flexible matching."""
+        name = self._get_bot_name()
+        return re.sub(r'[^\w ]', '', name, flags=re.UNICODE).strip()
+
+    def _matches_bot_name(self, name: str) -> bool:
+        """Case-insensitive match against full bot name or plain (no-emoji) version."""
+        full = self._get_bot_name()
+        plain = self._plain_bot_name()
+        nl = name.lower()
+        return nl == full.lower() or (plain and nl == plain.lower())
+
     def matches_custom_syntax(self, message: MeshMessage) -> bool:
         content = message.content.strip()
         if message.is_dm:
             if not content:
                 return False
-            # In DMs: trigger on @[BotName] alone, or just the bot name as plain text
-            bot_name = self._get_bot_name()
             stripped = self._strip_mentions(content).strip()
-            return (self._is_bot_mentioned(content) and stripped == '') or stripped.lower() == bot_name.lower()
-        # Channel: bot must be the only @-mention and nothing else in the message
+            # @[BotName] alone in DM — check mentions directly (handles emoji in bot name)
+            mentions = self._extract_mentions(content)
+            if mentions and stripped == '':
+                return any(self._matches_bot_name(m) for m in mentions)
+            # Plain text "Bender" (or "bender") in DM
+            return self._matches_bot_name(stripped)
+        # Channel: message_handler strips @[BotName] before we see it, leaving empty content
+        if content == '':
+            return True
+        # Fallback: respond_to_mentions disabled — check mentions directly
         mentions = self._extract_mentions(content)
-        if len(mentions) != 1 or not self._is_bot_mentioned(content):
+        if len(mentions) != 1 or not any(self._matches_bot_name(m) for m in mentions):
             return False
         return self._strip_mentions(content).strip() == ''
 
