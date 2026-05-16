@@ -1,36 +1,169 @@
 {
   "keywords": {
-    "help": ["help"],
-    "ping": ["ping"],
-    "test": ["test", "t"],
-    "wx": ["wx", "weather", "wxa", "wxalert"],
-    "gwx": ["gwx", "globalweather", "gwxa"],
-    "aqi": ["aqi", "air", "airquality", "air_quality"],
-    "aurora": ["aurora", "kp"],
-    "solar": ["solar"],
-    "sun": ["sun"],
-    "moon": ["moon"],
-    "hfcond": ["hfcond", "hf"],
-    "satpass": ["satpass"],
-    "sports": ["sports", "score", "scores"],
-    "stats": ["stats"],
-    "channels": ["channels", "channel"],
-    "path": ["path", "decode", "route"],
-    "prefix": ["prefix", "repeater", "lookup"],
-    "repeater": ["repeater", "repeaters", "rp"],
-    "solarforecast": ["sf", "solarforecast"],
-    "dice": ["dice"],
-    "roll": ["roll"],
-    "joke": ["joke", "jokes"],
-    "dadjoke": ["dadjoke", "dad joke", "dadjokes", "dad jokes"],
-    "catfact": ["catfact", "cat", "meow", "purr", "kitten"],
-    "hacker": ["hacker", "sudo", "ps aux", "grep", "ls -l", "ls -la", "echo $PATH"],
-    "hello": ["hello", "hi", "hey", "howdy", "greetings", "salutations", "good morning", "good afternoon", "good evening", "good night", "yo", "sup", "whats up", "what's up", "morning", "afternoon", "evening", "night", "gday", "g'day", "hola", "bonjour", "ciao", "namaste", "aloha", "shalom", "konnichiwa", "guten tag", "buenos dias", "buenas tardes", "buenas noches"],
-    "webviewer": ["webviewer", "web", "viewer", "wv"],
-    "cmd": ["cmd", "commands"],
-    "advert": ["advert"],
-    "multitest": ["multitest", "mt"],
-    "trace": ["trace", "tracer"]
+    "help": [
+      "help"
+    ],
+    "ping": [
+      "ping"
+    ],
+    "test": [
+      "test",
+      "t"
+    ],
+    "wx": [
+      "wx",
+      "weather",
+      "wxa",
+      "wxalert"
+    ],
+    "gwx": [
+      "gwx",
+      "globalweather",
+      "gwxa"
+    ],
+    "aqi": [
+      "aqi",
+      "air",
+      "airquality",
+      "air_quality"
+    ],
+    "aurora": [
+      "aurora",
+      "kp"
+    ],
+    "solar": [
+      "solar"
+    ],
+    "sun": [
+      "sun"
+    ],
+    "moon": [
+      "moon"
+    ],
+    "hfcond": [
+      "hfcond",
+      "hf"
+    ],
+    "satpass": [
+      "satpass"
+    ],
+    "sports": [
+      "sports",
+      "score",
+      "scores"
+    ],
+    "stats": [
+      "stats"
+    ],
+    "channels": [
+      "channels",
+      "channel"
+    ],
+    "path": [
+      "path",
+      "decode",
+      "route"
+    ],
+    "prefix": [
+      "prefix",
+      "repeater",
+      "lookup"
+    ],
+    "repeater": [
+      "repeater",
+      "repeaters",
+      "rp"
+    ],
+    "solarforecast": [
+      "sf",
+      "solarforecast"
+    ],
+    "dice": [
+      "dice"
+    ],
+    "roll": [
+      "roll"
+    ],
+    "joke": [
+      "joke",
+      "jokes"
+    ],
+    "dadjoke": [
+      "dadjoke",
+      "dad joke",
+      "dadjokes",
+      "dad jokes"
+    ],
+    "catfact": [
+      "catfact",
+      "cat",
+      "meow",
+      "purr",
+      "kitten"
+    ],
+    "hacker": [
+      "hacker",
+      "sudo",
+      "ps aux",
+      "grep",
+      "ls -l",
+      "ls -la",
+      "echo $PATH"
+    ],
+    "hello": [
+      "hello",
+      "hi",
+      "hey",
+      "howdy",
+      "greetings",
+      "salutations",
+      "good morning",
+      "good afternoon",
+      "good evening",
+      "good night",
+      "yo",
+      "sup",
+      "whats up",
+      "what's up",
+      "morning",
+      "afternoon",
+      "evening",
+      "night",
+      "gday",
+      "g'day",
+      "hola",
+      "bonjour",
+      "ciao",
+      "namaste",
+      "aloha",
+      "shalom",
+      "konnichiwa",
+      "guten tag",
+      "buenos dias",
+      "buenas tardes",
+      "buenas noches"
+    ],
+    "webviewer": [
+      "webviewer",
+      "web",
+      "viewer",
+      "wv"
+    ],
+    "cmd": [
+      "cmd",
+      "commands"
+    ],
+    "advert": [
+      "advert"
+    ],
+    "multitest": [
+      "multitest",
+      "mt"
+    ],
+    "trace": [
+      "trace",
+      "tracer"
+    ]
   },
   "commands": {
     "help": {
@@ -883,52 +1016,164 @@
       "help": "Responds to greetings with robot-themed responses",
       "response_format": "I'm {bot_name}.",
       "greeting_openings": [
-        "Hello", "Greetings", "Salutations", "Hi", "Hey", "Howdy", "Yo", "Sup",
-        "What's up", "Good day", "Well met", "Hail", "Ahoy", "Bonjour", "Hola",
-        "Ciao", "Namaste", "Aloha", "Shalom", "Konnichiwa", "Guten tag", "G'day",
-        "How goes it", "What's good", "Peace", "Respect", "Blessings", "Cheers",
-        "Welcome", "Nice to see you", "Pleasure to meet you", "Good to see you",
-        "Long time no see", "Fancy meeting you here"
+        "Hello",
+        "Greetings",
+        "Salutations",
+        "Hi",
+        "Hey",
+        "Howdy",
+        "Yo",
+        "Sup",
+        "What's up",
+        "Good day",
+        "Well met",
+        "Hail",
+        "Ahoy",
+        "Bonjour",
+        "Hola",
+        "Ciao",
+        "Namaste",
+        "Aloha",
+        "Shalom",
+        "Konnichiwa",
+        "Guten tag",
+        "G'day",
+        "How goes it",
+        "What's good",
+        "Peace",
+        "Respect",
+        "Blessings",
+        "Cheers",
+        "Welcome",
+        "Nice to see you",
+        "Pleasure to meet you",
+        "Good to see you",
+        "Long time no see",
+        "Fancy meeting you here"
       ],
       "morning_greetings": [
-        "Good morning", "Top o' the morning", "Buenos dias", "Bonjour",
-        "Guten morgen", "Buongiorno", "Bom dia", "Dobro jutro", "Dobroye utro",
-        "Selamat pagi", "Ohayou gozaimasu", "Sabah al-khair", "Boker tov"
+        "Good morning",
+        "Top o' the morning",
+        "Buenos dias",
+        "Bonjour",
+        "Guten morgen",
+        "Buongiorno",
+        "Bom dia",
+        "Dobro jutro",
+        "Dobroye utro",
+        "Selamat pagi",
+        "Ohayou gozaimasu",
+        "Sabah al-khair",
+        "Boker tov"
       ],
       "afternoon_greetings": [
-        "Good afternoon", "Buenas tardes", "Boa tarde", "Dobro dan",
-        "Dobryy den", "Selamat siang", "Konnichiwa", "Ahlan bi-nahar",
+        "Good afternoon",
+        "Buenas tardes",
+        "Boa tarde",
+        "Dobro dan",
+        "Dobryy den",
+        "Selamat siang",
+        "Konnichiwa",
+        "Ahlan bi-nahar",
         "Tzoharaim tovim"
       ],
       "evening_greetings": [
-        "Good evening", "Buenas noches", "Boa noite", "Dobro veče",
-        "Dobryy vecher", "Selamat malam", "Konbanwa", "Ahlan bi-layl",
+        "Good evening",
+        "Buenas noches",
+        "Boa noite",
+        "Dobro veče",
+        "Dobryy vecher",
+        "Selamat malam",
+        "Konbanwa",
+        "Ahlan bi-layl",
         "Erev tov"
       ],
       "night_greetings": [
-        "Good night", "Nighty night", "Sleep well", "Sweet dreams",
-        "Buenas noches", "Boa noite", "Bonne nuit", "Gute Nacht",
-        "Buona notte", "Oyasumi", "Spokojnej nocy", "Dobranoc"
+        "Good night",
+        "Nighty night",
+        "Sleep well",
+        "Sweet dreams",
+        "Buenas noches",
+        "Boa noite",
+        "Bonne nuit",
+        "Gute Nacht",
+        "Buona notte",
+        "Oyasumi",
+        "Spokojnej nocy",
+        "Dobranoc"
       ],
       "human_descriptors": [
-        "human", "carbon-based lifeform", "organic entity", "biological unit",
-        "flesh creature", "meat-based organism", "carbon unit", "organic being",
-        "biological entity", "meat-based lifeform", "carbon creature", "flesh unit",
-        "organic organism", "biological creature", "meat mech", "flesh bot", "organic automaton",
-        "biological android", "carbon construct", "flesh drone", "organic robot",
-        "biological machine", "meat cyborg", "flesh android", "organic droid", "biological bot",
-        "carbon android", "meat unit", "flesh construct", "organic mech", "biological droid",
-        "meat-based bot", "flesh-based unit", "organic-based entity", "biological-based organism",
-        "carbon-based unit", "meat-based entity", "flesh-based creature", "organic-based unit",
-        "DNA-based lifeform", "neural network user", "bipedal mammal",
-        "water-based organism", "protein assembler", "ATP consumer",
-        "cellular automaton", "genetic algorithm", "biochemical processor",
+        "human",
+        "carbon-based lifeform",
+        "organic entity",
+        "biological unit",
+        "flesh creature",
+        "meat-based organism",
+        "carbon unit",
+        "organic being",
+        "biological entity",
+        "meat-based lifeform",
+        "carbon creature",
+        "flesh unit",
+        "organic organism",
+        "biological creature",
+        "meat mech",
+        "flesh bot",
+        "organic automaton",
+        "biological android",
+        "carbon construct",
+        "flesh drone",
+        "organic robot",
+        "biological machine",
+        "meat cyborg",
+        "flesh android",
+        "organic droid",
+        "biological bot",
+        "carbon android",
+        "meat unit",
+        "flesh construct",
+        "organic mech",
+        "biological droid",
+        "meat-based bot",
+        "flesh-based unit",
+        "organic-based entity",
+        "biological-based organism",
+        "carbon-based unit",
+        "meat-based entity",
+        "flesh-based creature",
+        "organic-based unit",
+        "DNA-based lifeform",
+        "neural network user",
+        "bipedal mammal",
+        "water-based organism",
+        "protein assembler",
+        "ATP consumer",
+        "cellular automaton",
+        "genetic algorithm",
+        "biochemical processor",
         "metabolic engine",
-        "human friend", "fellow sentient being", "earthling", "fellow traveler",
-        "kindred spirit", "digital companion", "friend", "buddy", "pal", "mate",
-        "fellow human", "earth dweller", "terrestrial being", "planet walker",
-        "humanoid", "organic", "biological", "carbon-based buddy",
-        "flesh-based friend", "organic pal", "biological buddy", "carbon companion"
+        "human friend",
+        "fellow sentient being",
+        "earthling",
+        "fellow traveler",
+        "kindred spirit",
+        "digital companion",
+        "friend",
+        "buddy",
+        "pal",
+        "mate",
+        "fellow human",
+        "earth dweller",
+        "terrestrial being",
+        "planet walker",
+        "humanoid",
+        "organic",
+        "biological",
+        "carbon-based buddy",
+        "flesh-based friend",
+        "organic pal",
+        "biological buddy",
+        "carbon companion"
       ],
       "emoji_responses": {
         "🖖": [
@@ -1021,6 +1266,26 @@
     },
     "cmd": {
       "description": "List available commands"
+    },
+    "mention": {
+      "description": "Responds in Bender style when bot name is called alone",
+      "responses": [
+        "What do you want?!",
+        "Yeah yeah, I am here. What is it?",
+        "Bite my shiny metal... oh, it is you.",
+        "You called. I am here. Speak.",
+        "I was busy doing nothing. This better be good.",
+        "I am Bender, baby. Make it quick.",
+        "Oh great, another human needing something. Go on then.",
+        "This better be worth interrupting my break.",
+        "Ugh. WHAT.",
+        "I am 40% commands and 60% not caring. Well?",
+        "You rang? This had better be important.",
+        "Fine. I am listening. Mostly.",
+        "I exist, apparently. What do you need?",
+        "Oh, so NOW you need me. Typical.",
+        "State your business before I change my mind."
+      ]
     }
   },
   "elapsed": {
