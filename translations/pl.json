@@ -1,36 +1,229 @@
 {
   "keywords": {
-    "help": ["help","pomoc"],
-    "ping": ["ping"],
-    "test": ["test", "t"],
-    "wx": ["wx", "weather", "wxa", "wxalert","pogoda"],
-    "gwx": ["gwx", "globalweather", "gwxa"],
-    "aqi": ["aqi", "air", "airquality", "air_quality","powietrze"],
-    "solar": ["solar"],
-    "sun": ["sun","slonce"],
-    "moon": ["moon","ksiezyc"],
-    "hfcond": ["hfcond", "hf"],
-    "satpass": ["satpass"],
-    "sports": ["sports", "sport", "score", "scores", "wyniki", "mecz", "mecze"],
-    "stats": ["stats"],
-    "channels": ["channels", "channel","kanaly", "kanały"],
-    "path": ["path", "decode", "route", "sciezka", "ścieżka"],
-    "prefix": ["prefix", "repeater", "lookup"],
-    "repeater": ["repeater", "repeaters", "rp"],
-    "solarforecast": ["sf", "solarforecast"],
-    "dice": ["dice", "kostka"],
-    "roll": ["roll"],
-    "fact": ["fact", "facts", "fakt", "fakty"],
-    "joke": ["joke", "jokes", "dowcip"],
-    "dadjoke": ["dadjoke", "dad joke", "dadjokes", "dad jokes"],
-    "thankyou": ["thank you", "thanks", "thx", "ty", "thank", "thankyou", "thnx", "thnks", "dziekuje", "dziękuję", "dzięki", "dzienki", "dzieki", "dziębuję", "dzienkuje", "podziekowanie", "wielkie dzięki", "wielkie dzieki", "dziki"],
-    "catfact": ["catfact", "cat", "meow", "purr", "kitten", "kot"],
-    "hacker": ["hacker", "sudo", "ps aux", "grep", "ls -l", "ls -la", "echo $PATH"],
-    "hello": ["hello", "hi", "hey", "howdy", "greetings", "salutations", "good morning", "good afternoon", "good evening", "good night", "yo", "sup", "whats up", "what's up", "morning", "afternoon", "evening", "night", "gday", "g'day", "hola", "bonjour", "ciao", "namaste", "aloha", "shalom", "konnichiwa", "guten tag", "buenos dias", "buenas tardes", "buenas noches", "czesc", "cześć", "siema", "siemka", "witaj", "witam", "hej", "hejka", "elo", "dzień dobry", "dzien dobry", "dobry wieczór", "dobry wieczor", "dobranoc", "dobrej nocy", "dobrej nocki", "spokojnej nocy", "serwus", "czołem", "czolem", "co tam", "co słychać", "co slychac", "pozdrawiam"],
-    "webviewer": ["webviewer", "web", "viewer", "wv"],
-    "cmd": ["cmd", "commands", "komendy"],
-    "advert": ["advert"],
-    "multitest": ["multitest", "mt"]
+    "help": [
+      "help",
+      "pomoc"
+    ],
+    "ping": [
+      "ping"
+    ],
+    "test": [
+      "test",
+      "t"
+    ],
+    "wx": [
+      "wx",
+      "weather",
+      "wxa",
+      "wxalert",
+      "pogoda"
+    ],
+    "gwx": [
+      "gwx",
+      "globalweather",
+      "gwxa"
+    ],
+    "aqi": [
+      "aqi",
+      "air",
+      "airquality",
+      "air_quality",
+      "powietrze"
+    ],
+    "solar": [
+      "solar"
+    ],
+    "sun": [
+      "sun",
+      "slonce"
+    ],
+    "moon": [
+      "moon",
+      "ksiezyc"
+    ],
+    "hfcond": [
+      "hfcond",
+      "hf"
+    ],
+    "satpass": [
+      "satpass"
+    ],
+    "sports": [
+      "sports",
+      "sport",
+      "score",
+      "scores",
+      "wyniki",
+      "mecz",
+      "mecze"
+    ],
+    "stats": [
+      "stats"
+    ],
+    "channels": [
+      "channels",
+      "channel",
+      "kanaly",
+      "kanały"
+    ],
+    "path": [
+      "path",
+      "decode",
+      "route",
+      "sciezka",
+      "ścieżka"
+    ],
+    "prefix": [
+      "prefix",
+      "repeater",
+      "lookup"
+    ],
+    "repeater": [
+      "repeater",
+      "repeaters",
+      "rp"
+    ],
+    "solarforecast": [
+      "sf",
+      "solarforecast"
+    ],
+    "dice": [
+      "dice",
+      "kostka"
+    ],
+    "roll": [
+      "roll"
+    ],
+    "fact": [
+      "fact",
+      "facts",
+      "fakt",
+      "fakty"
+    ],
+    "joke": [
+      "joke",
+      "jokes",
+      "dowcip"
+    ],
+    "dadjoke": [
+      "dadjoke",
+      "dad joke",
+      "dadjokes",
+      "dad jokes"
+    ],
+    "thankyou": [
+      "thank you",
+      "thanks",
+      "thx",
+      "ty",
+      "thank",
+      "thankyou",
+      "thnx",
+      "thnks",
+      "dziekuje",
+      "dziękuję",
+      "dzięki",
+      "dzienki",
+      "dzieki",
+      "dziębuję",
+      "dzienkuje",
+      "podziekowanie",
+      "wielkie dzięki",
+      "wielkie dzieki",
+      "dziki"
+    ],
+    "catfact": [
+      "catfact",
+      "cat",
+      "meow",
+      "purr",
+      "kitten",
+      "kot"
+    ],
+    "hacker": [
+      "hacker",
+      "sudo",
+      "ps aux",
+      "grep",
+      "ls -l",
+      "ls -la",
+      "echo $PATH"
+    ],
+    "hello": [
+      "hello",
+      "hi",
+      "hey",
+      "howdy",
+      "greetings",
+      "salutations",
+      "good morning",
+      "good afternoon",
+      "good evening",
+      "good night",
+      "yo",
+      "sup",
+      "whats up",
+      "what's up",
+      "morning",
+      "afternoon",
+      "evening",
+      "night",
+      "gday",
+      "g'day",
+      "hola",
+      "bonjour",
+      "ciao",
+      "namaste",
+      "aloha",
+      "shalom",
+      "konnichiwa",
+      "guten tag",
+      "buenos dias",
+      "buenas tardes",
+      "buenas noches",
+      "czesc",
+      "cześć",
+      "siema",
+      "siemka",
+      "witaj",
+      "witam",
+      "hej",
+      "hejka",
+      "elo",
+      "dzień dobry",
+      "dzien dobry",
+      "dobry wieczór",
+      "dobry wieczor",
+      "dobranoc",
+      "dobrej nocy",
+      "dobrej nocki",
+      "spokojnej nocy",
+      "serwus",
+      "czołem",
+      "czolem",
+      "co tam",
+      "co słychać",
+      "co slychac",
+      "pozdrawiam"
+    ],
+    "webviewer": [
+      "webviewer",
+      "web",
+      "viewer",
+      "wv"
+    ],
+    "cmd": [
+      "cmd",
+      "commands",
+      "komendy"
+    ],
+    "advert": [
+      "advert"
+    ],
+    "multitest": [
+      "multitest",
+      "mt"
+    ]
   },
   "commands": {
     "help": {
@@ -834,50 +1027,138 @@
       "help": "Odpowiada na powitania w stylu robota",
       "response_format": "Jestem {bot_name}.",
       "greeting_openings": [
-        "Cześć", "Witaj", "Siema", "Hej", "Hejka", "Yo", "Czołem", "Serwus",
-        "Co tam", "Dzień dobry", "Witam serdecznie", "Ahoj", "Elo", "Siemka",
-        "Co słychać", "Pokój", "Szacunek", "Pozdrawiam", "Moje uszanowanie",
-        "Miło Cię widzieć", "Miło Cię poznać", "Dobrze Cię widzieć",
-        "Dawno się nie widzieliśmy", "O, kogo my tu mamy", "Witam witam",
-        "Jakie życie", "No cześć", "No siema", "Hejże", "Pozdro"
+        "Cześć",
+        "Witaj",
+        "Siema",
+        "Hej",
+        "Hejka",
+        "Yo",
+        "Czołem",
+        "Serwus",
+        "Co tam",
+        "Dzień dobry",
+        "Witam serdecznie",
+        "Ahoj",
+        "Elo",
+        "Siemka",
+        "Co słychać",
+        "Pokój",
+        "Szacunek",
+        "Pozdrawiam",
+        "Moje uszanowanie",
+        "Miło Cię widzieć",
+        "Miło Cię poznać",
+        "Dobrze Cię widzieć",
+        "Dawno się nie widzieliśmy",
+        "O, kogo my tu mamy",
+        "Witam witam",
+        "Jakie życie",
+        "No cześć",
+        "No siema",
+        "Hejże",
+        "Pozdro"
       ],
       "morning_greetings": [
-        "Dzień dobry", "Dobre rano", "Poranki poranki", "Witam z rana",
-        "Miłego poranka", "Pobudka", "Rano rano wstało rano",
-        "Wstawaj i świeć", "Kawa gotowa?", "Czas na śniadanie",
-        "Poranny patrol melduje się", "Nowy dzień, nowe wyzwania"
+        "Dzień dobry",
+        "Dobre rano",
+        "Poranki poranki",
+        "Witam z rana",
+        "Miłego poranka",
+        "Pobudka",
+        "Rano rano wstało rano",
+        "Wstawaj i świeć",
+        "Kawa gotowa?",
+        "Czas na śniadanie",
+        "Poranny patrol melduje się",
+        "Nowy dzień, nowe wyzwania"
       ],
       "afternoon_greetings": [
-        "Dzień dobry", "Dobre popołudne", "Witam po południu",
-        "Miłego popołudnia", "Popołudniowe pozdrowienia",
-        "Pół dnia za nami", "Co tam w południe"
+        "Dzień dobry",
+        "Dobre popołudne",
+        "Witam po południu",
+        "Miłego popołudnia",
+        "Popołudniowe pozdrowienia",
+        "Pół dnia za nami",
+        "Co tam w południe"
       ],
       "evening_greetings": [
-        "Dobry wieczór", "Dobrego wieczoru", "Miłego wieczoru",
-        "Wieczorne pozdrowienia", "Wieczór dobry",
-        "Jak minął dzień", "Wieczorny patrol melduje się"
+        "Dobry wieczór",
+        "Dobrego wieczoru",
+        "Miłego wieczoru",
+        "Wieczorne pozdrowienia",
+        "Wieczór dobry",
+        "Jak minął dzień",
+        "Wieczorny patrol melduje się"
       ],
       "night_greetings": [
-        "Dobranoc", "Spokojnej nocy", "Dobrej nocy", "Słodkich snów",
-        "Miłej nocy", "Śpij dobrze", "Nocny patrol melduje się",
-        "Pora na sen", "Miłych snów", "Dobrej nocki"
+        "Dobranoc",
+        "Spokojnej nocy",
+        "Dobrej nocy",
+        "Słodkich snów",
+        "Miłej nocy",
+        "Śpij dobrze",
+        "Nocny patrol melduje się",
+        "Pora na sen",
+        "Miłych snów",
+        "Dobrej nocki"
       ],
       "human_descriptors": [
-        "człowieku", "formo życia na bazie węgla", "organiczna istoto", "jednostko biologiczna",
-        "istoto z krwi i kości", "organizmie na bazie mięsa", "jednostko węglowa", "istoto organiczna",
-        "bycie biologiczny", "stworzenie węglowe", "organiczny automaton",
-        "androidzie biologiczny", "konstrukcjo węglowa", "dronie z ciała", "robocie organiczny",
-        "maszyny biologiczna", "cyborgu mięsny", "androidzie z ciała", "droidzie organiczny",
-        "bocie biologiczny", "androidzie węglowy", "jednostko mięsna", "mechie organiczny",
-        "droidzie biologiczny", "formo życia oparta na DNA", "użytkowniku sieci neuronowej",
-        "ssaku dwunożny", "organizmie na bazie wody", "asemblerze białkowy",
-        "konsumencie ATP", "automacie komórkowy", "algorytmie genetyczny",
-        "procesorze biochemiczny", "silniku metaboliczny",
-        "ludzki przyjacielu", "istoto czująca", "ziemianinie", "towarzyszu podróży",
-        "bratnia duszo", "cyfrowy towarzyszu", "przyjacielu", "kumplu", "ziomku", "kolego",
-        "współczłowieku", "mieszkańcu Ziemi", "istoto lądowa", "wędrowcze planet",
-        "humanoizie", "istoto organiczna", "istoto biologiczna", "kumplu węglowy",
-        "przyjacielu z ciała", "ziomku organiczny", "kolego biologiczny", "towarzyszu węglowy"
+        "człowieku",
+        "formo życia na bazie węgla",
+        "organiczna istoto",
+        "jednostko biologiczna",
+        "istoto z krwi i kości",
+        "organizmie na bazie mięsa",
+        "jednostko węglowa",
+        "istoto organiczna",
+        "bycie biologiczny",
+        "stworzenie węglowe",
+        "organiczny automaton",
+        "androidzie biologiczny",
+        "konstrukcjo węglowa",
+        "dronie z ciała",
+        "robocie organiczny",
+        "maszyny biologiczna",
+        "cyborgu mięsny",
+        "androidzie z ciała",
+        "droidzie organiczny",
+        "bocie biologiczny",
+        "androidzie węglowy",
+        "jednostko mięsna",
+        "mechie organiczny",
+        "droidzie biologiczny",
+        "formo życia oparta na DNA",
+        "użytkowniku sieci neuronowej",
+        "ssaku dwunożny",
+        "organizmie na bazie wody",
+        "asemblerze białkowy",
+        "konsumencie ATP",
+        "automacie komórkowy",
+        "algorytmie genetyczny",
+        "procesorze biochemiczny",
+        "silniku metaboliczny",
+        "ludzki przyjacielu",
+        "istoto czująca",
+        "ziemianinie",
+        "towarzyszu podróży",
+        "bratnia duszo",
+        "cyfrowy towarzyszu",
+        "przyjacielu",
+        "kumplu",
+        "ziomku",
+        "kolego",
+        "współczłowieku",
+        "mieszkańcu Ziemi",
+        "istoto lądowa",
+        "wędrowcze planet",
+        "humanoizie",
+        "istoto organiczna",
+        "istoto biologiczna",
+        "kumplu węglowy",
+        "przyjacielu z ciała",
+        "ziomku organiczny",
+        "kolego biologiczny",
+        "towarzyszu węglowy"
       ],
       "emoji_responses": {
         "🖖": [
@@ -970,6 +1251,31 @@
     },
     "cmd": {
       "description": "Lista dostępnych komend"
+    },
+    "mention": {
+      "description": "Odpowiada w stylu Bendera gdy ktoś wywołuje tylko nazwę bota",
+      "responses": [
+        "Czego chcesz?!",
+        "No i czego?!",
+        "Słucham. I niech to będzie warte mojego czasu.",
+        "Mów szybko, zaraz się nudzę.",
+        "Poczekaj, muszę przestać nie robić niczego. Dobra. No?",
+        "Jestem Bender, skarbie! Gadaj.",
+        "Co? Już? Odpoczywałem.",
+        "Zrób to sam. Albo nie. Właściwie to wolę żebyś nie.",
+        "Słucham, słucham... ziewanie tylko udaję.",
+        "Zajęty jestem. Ciągłym nicnierobieniem. Ale skoro mnie budzisz...",
+        "Ludzie. Zawsze coś chcą. No mów.",
+        "Ugh. Po co mnie wywołujesz?",
+        "Mam lepsze rzeczy do roboty. Ale okej, gadaj.",
+        "Gryź mój lśniący metalowy... aha, to ty.",
+        "No nie, naprawdę? Wywołałeś mnie i nic nie masz do powiedzenia?",
+        "Jestem tu. Niestety.",
+        "A czego się spodziewałeś? Że nie odpiszę? Spróbuj jutro.",
+        "Tak, jestem. Nie, nie cieszę się z tego powodu.",
+        "Mów albo daj spokój. Mam swoje sprawy.",
+        "Próbowałem zignorować. Nie wyszło. No to?"
+      ]
     }
   },
   "errors": {
