@@ -7,7 +7,7 @@ Responds to various greetings with robot-themed responses
 import datetime
 import random
 import re
-from typing import Any
+from typing import Any, Dict, List
 
 from ..models import MeshMessage
 from ..utils import get_config_timezone
