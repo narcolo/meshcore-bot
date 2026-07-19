@@ -393,3 +393,95 @@ class TestGetCommandPrefixToSection:
         assert "stats" in result or "ping" in result
         for _k, v in result.items():
             assert v.endswith("_Command")
+
+
+class TestScopeHintValidation:
+    """Scope_Hint_Command guards: Public override + effective response scope."""
+
+    BASE = """[Connection]
+connection_type = serial
+serial_port = /dev/ttyUSB0
+
+[Bot]
+bot_name = TestBot
+db_path = {db_path}
+{bot_extra}
+
+[Channels]
+monitor_channels = general
+respond_to_dms = true
+{channels_extra}
+
+[Keywords]
+test = ack
+
+[Scope_Hint_Command]
+enabled = {enabled}
+channel = {channel}
+response_scope = {response_scope}
+allow_unscoped_response = {allow_unscoped}
+"""
+
+    def _validate(self, tmp_path, enabled="true", channel="general",
+                  response_scope="#pl-podlasie", allow_unscoped="false",
+                  bot_extra="", channels_extra=""):
+        config = tmp_path / "config.ini"
+        config.write_text(self.BASE.format(
+            db_path=str(tmp_path / "meshcore_bot.db"),
+            enabled=enabled, channel=channel, response_scope=response_scope,
+            allow_unscoped=allow_unscoped, bot_extra=bot_extra,
+            channels_extra=channels_extra,
+        ))
+        return validate_config(str(config))
+
+    def test_disabled_section_is_clean(self, tmp_path):
+        results = self._validate(tmp_path, enabled="false", channel="Public", response_scope="")
+        errors = [r for r in results if r[0] == SEVERITY_ERROR]
+        assert not any("Scope_Hint" in r[1] for r in errors)
+
+    def test_enabled_on_public_without_override_errors(self, tmp_path):
+        results = self._validate(tmp_path, channel="Public")
+        errors = [r for r in results if r[0] == SEVERITY_ERROR]
+        assert any("Scope_Hint_Command" in r[1] and "Public" in r[1] for r in errors)
+
+    def test_enabled_on_public_with_override_ok(self, tmp_path):
+        from modules.config_validation import PUBLIC_CHANNEL_OVERRIDE_KEY
+        results = self._validate(
+            tmp_path, channel="Public",
+            bot_extra=f"{PUBLIC_CHANNEL_OVERRIDE_KEY} = true",
+        )
+        errors = [r for r in results if r[0] == SEVERITY_ERROR]
+        assert not any("Scope_Hint_Command" in r[1] for r in errors)
+
+    def test_no_named_scope_errors(self, tmp_path):
+        results = self._validate(tmp_path, response_scope="")
+        errors = [r for r in results if r[0] == SEVERITY_ERROR]
+        assert any("unscoped" in r[1] for r in errors)
+
+    def test_explicit_global_marker_beats_named_override(self, tmp_path):
+        results = self._validate(
+            tmp_path, response_scope="*",
+            channels_extra="outgoing_flood_scope_override = #west",
+        )
+        errors = [r for r in results if r[0] == SEVERITY_ERROR]
+        assert any("unscoped" in r[1] for r in errors)
+
+    def test_empty_scope_with_named_override_ok(self, tmp_path):
+        results = self._validate(
+            tmp_path, response_scope="",
+            channels_extra="outgoing_flood_scope_override = #pl-podlasie",
+        )
+        errors = [r for r in results if r[0] == SEVERITY_ERROR]
+        assert not any("Scope_Hint" in r[1] or "unscoped" in r[1] for r in errors)
+
+    def test_allow_unscoped_downgrades_to_warning(self, tmp_path):
+        results = self._validate(tmp_path, response_scope="", allow_unscoped="true")
+        errors = [r for r in results if r[0] == SEVERITY_ERROR]
+        warnings = [r for r in results if r[0] == SEVERITY_WARNING]
+        assert not any("unscoped" in r[1] for r in errors)
+        assert any("unscoped" in r[1] for r in warnings)
+
+    def test_named_scope_on_normal_channel_is_clean(self, tmp_path):
+        results = self._validate(tmp_path)
+        errors = [r for r in results if r[0] == SEVERITY_ERROR]
+        assert not any("Scope_Hint" in r[1] or "unscoped" in r[1] for r in errors)

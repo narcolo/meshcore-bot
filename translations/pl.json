@@ -1252,6 +1252,11 @@
     "cmd": {
       "description": "Lista dostępnych komend"
     },
+    "scope_hint": {
+      "description": "Ostrzega nadawców na skonfigurowanym kanale wysyłających wiadomości bez zakresu, by włączyli region",
+      "hint": "Hej @[{name}], włącz region {scope} - wiadomości bez zakresu będą odrzucane.",
+      "hint_short": "Włącz region {scope} - wiadomości bez zakresu będą odrzucane."
+    },
     "mention": {
       "description": "Odpowiada w stylu Bendera gdy ktoś wywołuje tylko nazwę bota",
       "responses": [

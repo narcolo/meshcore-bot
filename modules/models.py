@@ -29,6 +29,12 @@ class MeshMessage:
     routing_info: Optional[dict[str, Any]] = None
     # Matched flood scope for the reply (e.g. "#west"), None means global flood
     reply_scope: Optional[str] = None
+    # True when this channel message arrived as scoped TC_FLOOD, False when it
+    # arrived as plain unscoped FLOOD, None when unknown: RF correlation failed,
+    # matched only at sender level (pubkey) or via the most-recent fallback, or
+    # route type was DIRECT/TRANSPORT_DIRECT. Only packet-level correlation may
+    # set this. Do not infer scope status from reply_scope.
+    is_scoped_flood: Optional[bool] = None
     # Lowercased content set by base_command.cleanup_message_for_matching
     content_lower: str = ""
 
