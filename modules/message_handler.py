@@ -26,11 +26,15 @@ from .utils import (
 
 
 # Correlation kinds trustworthy enough to derive is_scoped_flood: only
-# packet-level matches identify the RF packet itself. 'exact_pubkey' proves
-# the sender, not the packet (one companion can send scoped and unscoped
-# packets within the RF window), and 'recent_fallback' is unkeyed — neither
-# may drive an automatic public warning.
-_TRUSTED_CORRELATION = frozenset({"exact_packet", "partial_packet"})
+# packet-level matches identify the RF packet itself. 'content_hash' is an
+# exact match of sha256(sender_timestamp + text) between the channel event
+# and a decrypted GRP_TXT log row (requires the library's decrypt_channels;
+# channel events carry no raw_hex/pubkey, so this is their only packet-level
+# link). 'exact_pubkey' proves the sender, not the packet (one companion can
+# send scoped and unscoped packets within the RF window), and
+# 'recent_fallback' is unkeyed — neither may drive an automatic public
+# warning.
+_TRUSTED_CORRELATION = frozenset({"exact_packet", "partial_packet", "content_hash"})
 
 
 class PendingMessageEntry(TypedDict):
@@ -1212,6 +1216,12 @@ class MessageHandler:
                         "scope_payload_hex": _lib_pkt_hex
                         if _lib_pkt_hex
                         else (decoded_packet.get("payload_hex") if decoded_packet else None),
+                        # Content hash of a decrypted GRP_TXT (uint32-le of
+                        # sha256(sender_timestamp + text)[:4]); present when the
+                        # library's decrypt_channels is enabled. Lets channel
+                        # events (which carry no raw_hex/pubkey) correlate to
+                        # this exact packet by content.
+                        "msg_hash": payload.get("msg_hash"),
                     }
                     if rf_data.get("route_type_int") == 0:
                         self.logger.debug(
@@ -1528,6 +1538,45 @@ class MessageHandler:
             self.logger.debug(f"Using most recent RF data (fallback): {packet_prefix} at {most_recent['timestamp']}")
         return most_recent, "recent_fallback"
 
+    @staticmethod
+    def _channel_msg_content_hash(payload: dict[str, Any]) -> int | None:
+        """Content hash linking a channel event to a decrypted GRP_TXT log row.
+
+        Mirrors the meshcore library exactly (reader.py CHANNEL_MSG_RECV /
+        meshcore_parser.py decrypt path): uint32-le of
+        sha256(sender_timestamp_le4 + text_bytes)[:4]. Returns None when the
+        payload lacks the needed fields (or the text does not round-trip
+        through UTF-8, in which case a hash mismatch would only cause a
+        fail-safe missed correlation anyway).
+        """
+        ts = payload.get("sender_timestamp")
+        text = payload.get("text")
+        if not isinstance(ts, int) or ts < 0 or ts > 0xFFFFFFFF or not isinstance(text, str) or not text:
+            return None
+        try:
+            data = ts.to_bytes(4, "little", signed=False) + text.encode("utf-8")
+        except (OverflowError, UnicodeEncodeError):
+            return None
+        return int.from_bytes(sha256(data).digest()[0:4], "little", signed=False)
+
+    def _find_rf_data_by_content_hash(
+        self, msg_hash: int, *, scope_eligible_only: bool, max_age_seconds: float | None = None
+    ) -> dict[str, Any] | None:
+        """Newest RF cache row whose decrypted GRP_TXT content hash matches."""
+        current_time = time.time()
+        if max_age_seconds is None:
+            max_age_seconds = self.rf_data_timeout
+        for data in sorted(self.recent_rf_data, key=lambda x: x.get("timestamp", 0), reverse=True):
+            if current_time - data.get("timestamp", 0) >= max_age_seconds:
+                continue
+            if data.get("msg_hash") != msg_hash:
+                continue
+            if scope_eligible_only and not self._is_rf_data_scope_eligible(data):
+                continue
+            self.logger.debug(f"Found content-hash match for channel message (msg_hash={msg_hash})")
+            return data
+        return None
+
     async def _correlate_channel_message_rf_data(
         self,
         message_packet_prefix: str | None,
@@ -1549,6 +1598,18 @@ class MessageHandler:
         correlation_key = message_packet_prefix or message_pubkey
         key_kind: Literal["packet", "pubkey"] = "packet" if message_packet_prefix else "pubkey"
 
+        # Strategy 0: exact content-hash match against decrypted GRP_TXT log
+        # rows (requires the library's decrypt_channels). This is the only
+        # packet-level link channel events have — they carry no raw_hex or
+        # pubkey — and it identifies the exact packet, so it is trusted.
+        content_hash = self._channel_msg_content_hash(payload)
+        if content_hash is not None:
+            row = self._find_rf_data_by_content_hash(
+                content_hash, scope_eligible_only=scope_eligible_only
+            )
+            if row is not None:
+                return row, "content_hash"
+
         recent_rf_data: dict[str, Any] | None = None
         correlation_kind: str | None = None
         if correlation_key:
@@ -1557,19 +1618,26 @@ class MessageHandler:
             )
 
         if (
-            correlation_key
+            (correlation_key or content_hash is not None)
             and correlation_kind not in _TRUSTED_CORRELATION
             and self.enhanced_correlation
             and not scope_eligible_only
             and not self._is_old_cached_message(payload.get("sender_timestamp", 0))
         ):
-            message_id = f"{correlation_key}_{next(self._correlation_seq)}"
+            message_id = f"{correlation_key or 'chan'}_{next(self._correlation_seq)}"
             self.store_message_for_correlation(message_id, payload)
             retry_data = None
             retry_kind = None
             try:
                 await asyncio.sleep(0.1)  # 100ms wait for RF data to arrive
-                retry_data, retry_kind = self._correlate_message_with_rf_data_ex(message_id)
+                if content_hash is not None:
+                    row = self._find_rf_data_by_content_hash(
+                        content_hash, scope_eligible_only=scope_eligible_only
+                    )
+                    if row is not None:
+                        retry_data, retry_kind = row, "content_hash"
+                if retry_kind is None and correlation_key:
+                    retry_data, retry_kind = self._correlate_message_with_rf_data_ex(message_id)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:

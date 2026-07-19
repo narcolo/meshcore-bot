@@ -2297,14 +2297,27 @@ class TestDelayedCorrelationPath:
                     await handler.handle_channel_message(event)
         return captured.get("msg")
 
-    async def test_no_correlation_key_skips_wait_and_pending(self, handler):
+    async def test_no_correlation_key_still_processes_and_cleans_pending(self, handler):
+        # Channel events carry no raw_hex/pubkey; the content hash (timestamp +
+        # text) now legitimately enables the delayed retry. Without a matching
+        # RF row the result stays untrusted and the pending entry never leaks.
         self._setup(handler)
-        with patch("modules.message_handler.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
-            msg = await self._run(handler, self._event(raw_hex=None))
+        msg = await self._run(handler, self._event(raw_hex=None))
         assert msg is not None  # still reaches normal processing
         assert msg.is_scoped_flood is None
         assert handler.pending_messages == {}
-        mock_sleep.assert_not_awaited()  # no 100ms wait without a key
+
+    async def test_no_key_and_no_content_fields_skips_wait(self, handler):
+        # With neither a correlation key nor content-hash fields there is
+        # nothing to correlate: no 100ms wait, no pending entry.
+        self._setup(handler)
+        event = self._event(raw_hex=None)
+        del event.payload["sender_timestamp"]
+        event.payload["sender_timestamp"] = None  # hash helper returns None
+        with patch("modules.message_handler.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            msg = await self._run(handler, event)
+        assert handler.pending_messages == {}
+        mock_sleep.assert_not_awaited()
 
     async def test_trusted_exact_match_derives_unscoped(self, handler):
         self._setup(handler)
@@ -2520,3 +2533,157 @@ class TestScopeHintHookOrdering:
         await handler.handle_new_contact(ev, None)
         assert rm.track_contact_advertisement.await_count == 2
         rm.add_companion_from_contact_data.assert_awaited_once()
+
+
+# ---------------------------------------------------------------------------
+# Content-hash correlation (channel events carry no raw_hex/pubkey)
+# ---------------------------------------------------------------------------
+
+from hashlib import sha256 as _sha256
+
+
+def _content_hash(ts: int, text: str) -> int:
+    """Reference implementation of the meshcore library's msg_hash formula."""
+    data = ts.to_bytes(4, "little", signed=False) + text.encode("utf-8")
+    return int.from_bytes(_sha256(data).digest()[0:4], "little", signed=False)
+
+
+class TestContentHashCorrelation:
+    """msg_hash linking between channel events and decrypted GRP_TXT log rows."""
+
+    def test_hash_matches_library_formula(self, handler):
+        ts, text = 1784474380, "ALICE: hello mesh"
+        payload = {"sender_timestamp": ts, "text": text}
+        assert handler._channel_msg_content_hash(payload) == _content_hash(ts, text)
+
+    def test_hash_none_without_fields(self, handler):
+        assert handler._channel_msg_content_hash({}) is None
+        assert handler._channel_msg_content_hash({"sender_timestamp": 5}) is None
+        assert handler._channel_msg_content_hash({"text": "x"}) is None
+        assert handler._channel_msg_content_hash({"sender_timestamp": -1, "text": "x"}) is None
+        assert handler._channel_msg_content_hash({"sender_timestamp": 2**33, "text": "x"}) is None
+
+    def test_find_row_by_content_hash(self, handler):
+        h = _content_hash(123, "A: hi")
+        handler.recent_rf_data = [
+            {"timestamp": time.time(), "msg_hash": 999, "route_type_int": 1},
+            {"timestamp": time.time(), "msg_hash": h, "route_type_int": 1},
+        ]
+        row = handler._find_rf_data_by_content_hash(h, scope_eligible_only=False)
+        assert row is not None and row["msg_hash"] == h
+
+    def test_find_row_respects_age(self, handler):
+        h = _content_hash(123, "A: hi")
+        handler.rf_data_timeout = 15.0
+        handler.recent_rf_data = [
+            {"timestamp": time.time() - 60, "msg_hash": h, "route_type_int": 1},
+        ]
+        assert handler._find_rf_data_by_content_hash(h, scope_eligible_only=False) is None
+
+    async def test_channel_event_without_raw_hex_correlates_by_content(self, handler):
+        # The production case: CHANNEL_MSG_RECV has no raw_hex/pubkey at all.
+        ts, text = int(time.time()), "ALICE: unscoped test"
+        h = _content_hash(ts, text)
+        handler.enhanced_correlation = True
+        handler.bot.connection_time = None
+        handler.recent_rf_data = [{
+            "timestamp": time.time(),
+            "msg_hash": h,
+            "route_type_int": 1,  # plain FLOOD (unscoped)
+            "packet_prefix": "aa" * 16,
+            "pubkey_prefix": "",
+        }]
+        payload = {"sender_timestamp": ts, "text": text}
+        data, kind = await handler._correlate_channel_message_rf_data(
+            None, "", payload, scope_eligible_only=False, extended_timeout=30.0
+        )
+        assert kind == "content_hash"
+        assert data["msg_hash"] == h
+        from modules.message_handler import _TRUSTED_CORRELATION
+        assert "content_hash" in _TRUSTED_CORRELATION
+
+    async def test_content_hash_mismatch_stays_untrusted(self, handler):
+        ts, text = int(time.time()), "ALICE: unscoped test"
+        handler.enhanced_correlation = False
+        handler.recent_rf_data = [{
+            "timestamp": time.time(),
+            "msg_hash": 12345,  # different message
+            "route_type_int": 1,
+            "packet_prefix": "aa" * 16,
+            "pubkey_prefix": "",
+        }]
+        payload = {"sender_timestamp": ts, "text": text}
+        data, kind = await handler._correlate_channel_message_rf_data(
+            None, "", payload, scope_eligible_only=False, extended_timeout=30.0
+        )
+        assert kind == "recent_fallback"  # diagnostics only, never trusted
+
+    async def test_delayed_content_hash_upgrade(self, handler):
+        # Row with matching hash arrives during the 100ms wait
+        ts, text = int(time.time()), "ALICE: late packet"
+        h = _content_hash(ts, text)
+        handler.enhanced_correlation = True
+        handler.bot.connection_time = None
+        handler.recent_rf_data = []
+        payload = {"sender_timestamp": ts, "text": text}
+
+        async def sleep_and_inject(_delay):
+            handler.recent_rf_data.append({
+                "timestamp": time.time(),
+                "msg_hash": h,
+                "route_type_int": 1,
+                "packet_prefix": "bb" * 16,
+                "pubkey_prefix": "",
+            })
+
+        with patch("modules.message_handler.asyncio.sleep", side_effect=sleep_and_inject):
+            data, kind = await handler._correlate_channel_message_rf_data(
+                None, "", payload, scope_eligible_only=False, extended_timeout=30.0
+            )
+        assert kind == "content_hash"
+        assert handler.pending_messages == {}
+
+    async def test_end_to_end_derives_unscoped_without_raw_hex(self, handler):
+        """Full handle_channel_message: no raw_hex, content-hash row => is_scoped_flood False."""
+        handler.logger = Mock()
+        handler.bot.meshcore = Mock()
+        handler.bot.meshcore.contacts = {}
+        handler.bot.channel_manager = Mock()
+        handler.bot.channel_manager.get_channel_name = Mock(return_value="Public")
+        handler.bot.translator = None
+        handler.bot.mesh_graph = None
+        handler.bot.connection_time = None
+        handler.enhanced_correlation = True
+        handler.bot.command_manager.flood_scope_keys = {}
+        handler.bot.command_manager.commands = {}
+
+        ts = int(time.time())
+        text = "ALICE: test bez zakresu"
+        h = _content_hash(ts, text)
+        handler.recent_rf_data = [{
+            "timestamp": time.time(),
+            "msg_hash": h,
+            "route_type_int": 1,  # plain FLOOD
+            "packet_prefix": "cc" * 16,
+            "pubkey_prefix": "",
+            "raw_hex": "",
+        }]
+        event = Mock()
+        event.payload = {
+            "channel_idx": 0,
+            "text": text,
+            "path_len": 255,
+            "sender_timestamp": ts,
+        }
+        captured = {}
+
+        async def capture(msg):
+            captured["msg"] = msg
+
+        with patch.object(handler, "process_message", side_effect=capture):
+            with patch.object(handler, "_debug_decode_message_path", new_callable=AsyncMock):
+                with patch.object(handler, "_debug_decode_packet_for_message", new_callable=AsyncMock):
+                    await handler.handle_channel_message(event)
+        msg = captured.get("msg")
+        assert msg is not None
+        assert msg.is_scoped_flood is False  # confidently unscoped -> hint may fire
