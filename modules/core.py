@@ -1347,6 +1347,18 @@ long_jokes = false
                 # Wait for contacts to load
                 await self.wait_for_contacts()
 
+                # Enable channel-log decryption in the meshcore library: RF log
+                # rows for GRP_TXT then carry msg_hash (sha256(timestamp+text)),
+                # giving channel events an exact content-level packet match —
+                # required by scope_hint's trusted-correlation gate (channel
+                # events carry no raw_hex/pubkey to correlate by otherwise).
+                try:
+                    if hasattr(self.meshcore, "set_decrypt_channel_logs"):
+                        self.meshcore.set_decrypt_channel_logs(True)
+                        self.logger.info("Channel log decryption enabled (content-hash correlation)")
+                except Exception as e:
+                    self.logger.warning(f"Could not enable channel log decryption: {e}")
+
                 # Fetch channels
                 await self.channel_manager.fetch_channels()
 
