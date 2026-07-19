@@ -11,6 +11,21 @@ The path command supports **1-, 2-, and 3-byte-per-hop** paths (2, 4, or 6 hex c
   - **Comma-separated** (e.g. `path 0102,5f7e`): Hop size is inferred from token length. All tokens must be the same length (2, 4, or 6 hex chars). Example: `0102,5f7e` → two 2-byte hops.
   - **Continuous hex** (e.g. `path 01025f7e`): The bot’s [Bot] **`prefix_bytes`** is used (2 hex chars = 1 byte, 4 = 2 bytes, 6 = 3 bytes). Use comma-separated input to force a multi-byte interpretation when the bot is in 1-byte mode.
 
+## Reply prefix and repeater name gating
+
+These options only affect the **path** command’s reply text and whether repeater names are resolved from the database.
+
+**`reply_prefix`** (string, default empty)
+
+- Prepended as the first line of path command RF replies (only the **first** chunk when the reply is split for length).
+- Uses Python `str.format` on the **triggering** message. Placeholders: `{sender}`, `{connection_info}`, `{path}`, `{timestamp}`, `{snr}`, `{rssi}` (same idea as `[Multitest_Command]` `response_format`).
+
+**`minimum_path_bytes`** (integer `0`–`3`, default `0`)
+
+- **`0` or `1`**: Always resolve repeater names when decoding a path (legacy behavior).
+- **`2` or `3`**: Resolve names only when the packet path uses at least that many **bytes per hop** (from routing metadata or inferred from comma-separated hex width). Otherwise the bot replies with `Path: …` (hex) and a short tip, without a DB lookup.
+- **Not** the same as `require_path_bytes_greater_or_equal_to`: that setting can block the path command entirely; `minimum_path_bytes` only gates naming.
+
 ## Quick Start: Presets
 
 The Path Command supports three presets that configure multiple related settings:
@@ -246,6 +261,17 @@ These settings control how graph edges are stored in the database.
 - Distance penalties: enabled (50km threshold, weaker penalty)
 - Final hop proximity: enabled with lower weight
 - Good for: Well-connected networks with strong graph evidence
+
+## Geographic scoring toggle
+
+**`geographic_scoring_enabled`** in `[Path_Command]` (default `true`):
+
+- When **`true`**, geographic proximity scoring is used during path decode (subject to other preset and graph settings).
+- When **`false`**, geographic proximity guessing is disabled entirely for path decode.
+
+This is a **configuration** option only — there is no chat subcommand to toggle it at runtime. Restart the bot (or reload config if supported) after changing it.
+
+See also the [`path` command](command-reference.md#path-or-decode-or-route) in the command reference.
 
 ## Typical LoRa Transmission Ranges
 

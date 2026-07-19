@@ -510,8 +510,14 @@ class BaseCommand(ABC):
         }
 
     async def send_response(
-        self, message: MeshMessage, content: str, skip_user_rate_limit: bool = False,
-        skip_per_user_rate_limit: bool = False, record_user_rate_limit: bool = True,
+        self,
+        message: MeshMessage,
+        content: str,
+        skip_user_rate_limit: bool = False,
+        *,
+        command_id: str | None = None,
+        skip_per_user_rate_limit: bool = False,
+        record_user_rate_limit: bool = True,
     ) -> bool:
         """Unified method for sending responses to users.
 
@@ -520,6 +526,7 @@ class BaseCommand(ABC):
             content: The response content.
             skip_user_rate_limit: If True, skip BOTH global and per-user admission
                 checks (legacy combined flag for automated responses).
+            command_id: Optional id for repeat/transmission tracking.
             skip_per_user_rate_limit: If True, skip only the sender-specific
                 admission check; the global limiter still applies.
             record_user_rate_limit: If False, a successful send is not recorded
@@ -531,7 +538,10 @@ class BaseCommand(ABC):
         try:
             # Use the command manager's send_response method to ensure response capture
             return await self.bot.command_manager.send_response(
-                message, content, skip_user_rate_limit=skip_user_rate_limit,
+                message,
+                content,
+                skip_user_rate_limit=skip_user_rate_limit,
+                command_id=command_id,
                 skip_per_user_rate_limit=skip_per_user_rate_limit,
                 record_user_rate_limit=record_user_rate_limit,
             )

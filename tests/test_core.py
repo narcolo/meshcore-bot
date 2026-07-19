@@ -3,7 +3,7 @@
 import asyncio
 import struct
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -546,7 +546,9 @@ class TestSendStartupAdvertTimeout:
         bot = MeshCoreBot(config_file=str(config_file))
         bot.config.set("Bot", "startup_advert", "flood")
         bot.meshcore = MagicMock()
-        bot.meshcore.commands.send_advert = MagicMock()
+        # AsyncMock: the 'flood' branch bare-awaits the zero-hop pre-send before
+        # the wait_for-wrapped flood advert; a plain MagicMock is not awaitable.
+        bot.meshcore.commands.send_advert = AsyncMock()
         bot._record_send_failure = MagicMock()
 
         async def run():
