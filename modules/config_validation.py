@@ -302,7 +302,7 @@ def validate_config(config_path: str) -> list[tuple[str, str]]:
                 "Scope_Hint_Command is enabled without a named response scope: the "
                 "warning about unscoped traffic would itself be sent as unscoped "
                 "global FLOOD. Set [Scope_Hint_Command] response_scope (e.g. "
-                "#pl-podlasie), or [Channels] outgoing_flood_scope_override, or "
+                "pl-podlasie), or [Channels] outgoing_flood_scope_override, or "
                 "explicitly accept this with allow_unscoped_response = true.",
             ))
         elif effective_is_global and allow_unscoped:

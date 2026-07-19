@@ -113,7 +113,10 @@ class ScopeHintCommand(BaseCommand):
         """Resolve the named scope for the warning send, or "" for global.
 
         Precedence (explicit beats fallback):
-        - response_scope named           -> use it (normalized, '#' prepended)
+        - response_scope named           -> use it, normalized to the hash-less
+          display form ("pl-podlasie"; a configured leading '#' is stripped —
+          "name" and "#name" are the same region, and the '#' is applied only
+          at key derivation, by meshcore-py / the firmware)
         - response_scope explicit global -> global ("" returned), even when the
           outgoing override names a scope
         - response_scope empty/absent    -> outgoing_flood_scope_override if it

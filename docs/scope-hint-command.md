@@ -2,7 +2,7 @@
 
 The **Scope Hint Command** watches a configured channel (default: Public) and warns senders whose messages arrive as plain unscoped `FLOOD` to switch to scoped (`TC_FLOOD`) routing.
 
-It is a transition-period nudge: the mesh is moving toward requiring regional scopes (e.g. `#pl-podlasie`), and unscoped messages will eventually be refused. The command has no keywords — it is invoked automatically from the message handler and is excluded from the generic command pipeline (`automatic_hook_only`), so it never appears to execute as a user command.
+It is a transition-period nudge: the mesh is moving toward requiring regional scopes (e.g. `pl-podlasie`), and unscoped messages will eventually be refused. The command has no keywords — it is invoked automatically from the message handler and is excluded from the generic command pipeline (`automatic_hook_only`), so it never appears to execute as a user command.
 
 ## Configuration
 
@@ -13,7 +13,7 @@ Add this section to your `config.ini`:
 enabled = false
 channel = Public
 cooldown_hours = 24
-response_scope = #pl-podlasie
+response_scope = pl-podlasie
 allow_unscoped_response = false
 ```
 
@@ -22,7 +22,7 @@ allow_unscoped_response = false
 - **enabled**: Set `true` to activate (default: `false`).
 - **channel**: Channel to watch, matched case-insensitively (default: `Public`). Deliberately singular — do **not** add a `channels` key to this section; that would register the channels with the generic per-command channel-override mechanism and open them to general command processing.
 - **cooldown_hours**: Hours before the same companion can be warned again (default: `24`; values below 1 fall back to 24 with a logged warning).
-- **response_scope**: Named scope used for the warning transmission itself. Canonical lowercase; `#` is prepended if missing. Explicit global markers (`*`, `0`, `None`) force a global response and require `allow_unscoped_response = true`. Empty falls back to `[Channels] outgoing_flood_scope_override`.
+- **response_scope**: Named scope used for the warning transmission itself, in **hash-less form** (`pl-podlasie`). A leading `#` in config is accepted and stripped — `name` and `#name` are the same region: both the firmware (`RegionMap.cpp`, implicit auto hashtag region) and the meshcore library prepend `#` internally, only when deriving the scope key. Hash-less is also what mesh users see and type in their app, and what the hint text shows them. Explicit global markers (`*`, `0`, `None`) force a global response and require `allow_unscoped_response = true`. Empty falls back to `[Channels] outgoing_flood_scope_override`.
 - **allow_unscoped_response**: Explicitly accept sending the warning as unscoped global FLOOD (e.g. so unscoped-only listeners are reachable during the transition). Without this, the command **disables itself** when no named scope is in effect — a warning about unscoped traffic must not itself be an unscoped packet.
 
 ## Public channel authorization
@@ -63,7 +63,7 @@ When the migration ends, the whole `scope_hint_notified:*` keyspace in `bot_meta
 
 The warning must fit MeshCore's channel-message body budget (`160 − bot username − 2`, minus 10 bytes for a regional-scope send). The command enforces this at runtime:
 
-1. The full hint (`Hi @[name], enable scope #pl-podlasie …`) is used when it fits.
+1. The full hint (`Hi @[name], enable scope pl-podlasie …`) is used when it fits.
 2. Oversized sender names fall back to a nameless short form (`hint_short`) — a mention is never truncated mid-name.
 3. If even the short form exceeds the budget (oversized `response_scope` or translation), nothing is sent and no cooldown is recorded; an error is logged.
 
@@ -71,14 +71,14 @@ The warning must fit MeshCore's channel-message body budget (`160 − bot userna
 
 `scope_hint` observes unscoped messages **even when a named-only `flood_scopes` allowlist is configured** — it runs just before the allowlist drop. No `*` entry is needed, and all other command/keyword processing remains blocked for dropped messages.
 
-Typical `#pl-podlasie` deployment sets both:
+Typical `pl-podlasie` deployment sets both:
 
 ```ini
 [Channels]
-flood_scopes = #pl-podlasie
+flood_scopes = pl-podlasie
 
 [Scope_Hint_Command]
-response_scope = #pl-podlasie
+response_scope = pl-podlasie
 ```
 
 ## Translations

@@ -48,7 +48,7 @@ class TestResolveChannelSendScope:
         cm = _command_manager(config)
         assert cm.resolve_channel_send_scope(
             scope=None, config_section="Weather_Service"
-        ) == "#west"
+        ) == "west"
 
     def test_returns_none_for_override_fallback(self):
         cm = _command_manager(_make_config(outgoing_flood_scope_override="#west"))
@@ -79,7 +79,7 @@ class TestGetMeshFloodScope:
         bot.config = config
         bot.logger = Mock()
         svc = _StubService(bot)
-        assert svc.get_mesh_flood_scope() == "#sea"
+        assert svc.get_mesh_flood_scope() == "sea"
 
     def test_empty_returns_none(self):
         config = configparser.ConfigParser()
@@ -120,7 +120,7 @@ async def test_send_channel_message_applies_override_when_resolve_returns_none()
     await cm.send_channel_message("general", "hi", scope=None)
 
     set_flood_scope.assert_awaited()
-    assert set_flood_scope.await_args_list[0].args[0] == "#west"
+    assert set_flood_scope.await_args_list[0].args[0] == "west"
 
 
 # ---------------------------------------------------------------------------
@@ -193,7 +193,7 @@ class TestSetFloodScopeResultHandling:
         bot.meshcore.commands.send_chan_msg.assert_awaited_once()
         warning_calls = str(bot.logger.warning.call_args_list)
         assert "set_flood_scope" in warning_calls
-        assert "#west" in warning_calls
+        assert "west" in warning_calls
 
     @pytest.mark.asyncio
     async def test_none_result_logs_warning_and_still_sends(self):
@@ -270,7 +270,7 @@ class TestRetryReappliesScope:
 
         assert result is True
         calls = [c.args[0] for c in bot.meshcore.commands.set_flood_scope.await_args_list]
-        assert calls == ["#west", "*", "#west", "*"]
+        assert calls == ["west", "*", "west", "*"]
 
     @pytest.mark.asyncio
     async def test_retry_reapply_failure_logs_warning(self):

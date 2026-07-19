@@ -423,7 +423,7 @@ allow_unscoped_response = {allow_unscoped}
 """
 
     def _validate(self, tmp_path, enabled="true", channel="general",
-                  response_scope="#pl-podlasie", allow_unscoped="false",
+                  response_scope="pl-podlasie", allow_unscoped="false",
                   bot_extra="", channels_extra=""):
         config = tmp_path / "config.ini"
         config.write_text(self.BASE.format(
@@ -469,7 +469,7 @@ allow_unscoped_response = {allow_unscoped}
     def test_empty_scope_with_named_override_ok(self, tmp_path):
         results = self._validate(
             tmp_path, response_scope="",
-            channels_extra="outgoing_flood_scope_override = #pl-podlasie",
+            channels_extra="outgoing_flood_scope_override = pl-podlasie",
         )
         errors = [r for r in results if r[0] == SEVERITY_ERROR]
         assert not any("Scope_Hint" in r[1] or "unscoped" in r[1] for r in errors)

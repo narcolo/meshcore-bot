@@ -231,7 +231,7 @@ class TestHandleWebhookDispatch:
         )
         await svc._handle_webhook(req)
         _, kwargs = bot.command_manager.send_channel_message.call_args
-        assert kwargs.get("scope") == "#west"
+        assert kwargs.get("scope") == "west"
 
     @pytest.mark.asyncio
     async def test_flood_scope_null_falls_back_to_config(self, mock_logger):
@@ -241,7 +241,7 @@ class TestHandleWebhookDispatch:
         )
         await svc._handle_webhook(req)
         _, kwargs = bot.command_manager.send_channel_message.call_args
-        assert kwargs.get("scope") == "#sea"
+        assert kwargs.get("scope") == "sea"
 
     @pytest.mark.asyncio
     async def test_config_flood_scope_used_when_body_omits_it(self, mock_logger):
@@ -249,7 +249,7 @@ class TestHandleWebhookDispatch:
         req = _make_request(body={"channel": "general", "message": "Hello!"})
         await svc._handle_webhook(req)
         _, kwargs = bot.command_manager.send_channel_message.call_args
-        assert kwargs.get("scope") == "#sea"
+        assert kwargs.get("scope") == "sea"
 
     @pytest.mark.asyncio
     async def test_long_message_truncated(self, mock_logger):
