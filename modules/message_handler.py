@@ -7,10 +7,11 @@ Processes incoming messages and routes them to appropriate command handlers
 import asyncio
 import copy
 import hmac as hmac_mod
+import itertools
 import time
 from collections import OrderedDict
 from hashlib import sha256
-from typing import Any, TypedDict
+from typing import Any, Literal, TypedDict
 
 from .enums import AdvertFlags, DeviceRole, PayloadType, PayloadVersion, RouteType
 from .graph_trace_helper import update_mesh_graph_from_trace_data
@@ -22,6 +23,14 @@ from .utils import (
     encode_path_len_byte,
     format_elapsed_display,
 )
+
+
+# Correlation kinds trustworthy enough to derive is_scoped_flood: only
+# packet-level matches identify the RF packet itself. 'exact_pubkey' proves
+# the sender, not the packet (one companion can send scoped and unscoped
+# packets within the RF window), and 'recent_fallback' is unkeyed — neither
+# may drive an automatic public warning.
+_TRUSTED_CORRELATION = frozenset({"exact_packet", "partial_packet"})
 
 
 class PendingMessageEntry(TypedDict):
@@ -56,6 +65,8 @@ class MessageHandler:
 
         # Message correlation system to prevent race conditions
         self.pending_messages: dict[str, PendingMessageEntry] = {}  # Store messages waiting for RF data
+        # Sequence for delayed-correlation message IDs (ms timestamps can collide)
+        self._correlation_seq = itertools.count()
 
         # Enhanced RF data storage with better correlation
         self.rf_data_by_timestamp: dict[int | float, dict[str, Any]] = {}  # Index by timestamp for faster lookup
@@ -1244,6 +1255,98 @@ class MessageHandler:
             self.recent_rf_data.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
             self.recent_rf_data = self.recent_rf_data[: self._max_rf_cache_size]
 
+    @staticmethod
+    def _is_valid_packet_correlation_key(correlation_key: str) -> bool:
+        """True when the key can be trusted for packet-level matching.
+
+        Packet-level trust requires at least 16 hex chars (8 bytes of packet
+        prefix — enough to identify the packet itself) of valid even-length
+        hex; anything weaker must not produce an exact/partial packet match.
+        """
+        if len(correlation_key) < 16 or len(correlation_key) % 2 != 0:
+            return False
+        try:
+            bytes.fromhex(correlation_key)
+        except ValueError:
+            return False
+        return True
+
+    def _find_recent_rf_data_ex(
+        self,
+        correlation_key: str | None = None,
+        *,
+        key_kind: Literal["packet", "pubkey"] | None = None,
+        max_age_seconds: float | None = None,
+    ) -> tuple[dict[str, Any] | None, str | None]:
+        """Find recent RF data, returning (data, correlation_kind).
+
+        correlation_kind ∈ 'exact_packet' | 'partial_packet' | 'exact_pubkey'
+        | 'recent_fallback' | None and describes THIS lookup, not the packet:
+        cached RF dicts are never mutated.
+
+        The trusted/untrusted boundary is structural: packet kinds
+        ('exact_packet'/'partial_packet') are only reachable with
+        key_kind="packet" and a valid even-length hex key of >= 16 chars —
+        a pubkey value that happens to equal some packet_prefix must not
+        earn packet-level trust. key_kind="pubkey" can yield only
+        'exact_pubkey' or 'recent_fallback'. key_kind=None (legacy callers)
+        keeps the historical behavior of trying all strategies.
+        """
+        current_time = time.time()
+
+        if max_age_seconds is None:
+            max_age_seconds = self.rf_data_timeout
+
+        recent_data = [data for data in self.recent_rf_data if current_time - data["timestamp"] < max_age_seconds]
+
+        if not recent_data:
+            self.logger.debug(f"No recent RF data found within {max_age_seconds}s window")
+            return None, None
+
+        # key_kind=None (legacy callers): historical behavior, all strategies.
+        # key_kind="packet": packet strategies only with a validated key.
+        # key_kind="pubkey": packet strategies never run.
+        if key_kind is None:
+            packet_key_ok = correlation_key is not None
+        elif key_kind == "packet":
+            packet_key_ok = correlation_key is not None and self._is_valid_packet_correlation_key(correlation_key)
+        else:
+            packet_key_ok = False
+
+        # Strategy 1: Try exact packet prefix match first (for RF data correlation)
+        if correlation_key and packet_key_ok:
+            for data in recent_data:
+                rf_packet_prefix = data.get("packet_prefix", "") or ""
+                if rf_packet_prefix == correlation_key:
+                    self.logger.debug(f"Found exact packet prefix match: {rf_packet_prefix}")
+                    return data, "exact_packet"
+
+        # Strategy 2: Try pubkey prefix match (for message correlation)
+        if correlation_key and key_kind in ("pubkey", None):
+            for data in recent_data:
+                rf_pubkey_prefix = data.get("pubkey_prefix", "") or ""
+                if rf_pubkey_prefix == correlation_key:
+                    self.logger.debug(f"Found exact pubkey prefix match: {rf_pubkey_prefix}")
+                    return data, "exact_pubkey"
+
+        # Strategy 3: Try partial packet prefix matches
+        if correlation_key and packet_key_ok:
+            for data in recent_data:
+                rf_packet_prefix = data.get("packet_prefix", "") or ""
+                # Check for partial match (at least 16 characters)
+                min_length = min(len(rf_packet_prefix), len(correlation_key), 16)
+                if rf_packet_prefix[:min_length] == correlation_key[:min_length] and min_length >= 16:
+                    self.logger.debug(
+                        f"Found partial packet prefix match: {rf_packet_prefix[:16]}... matches {correlation_key[:16]}..."
+                    )
+                    return data, "partial_packet"
+
+        # Strategy 4: Use most recent data (fallback for timing issues)
+        most_recent = max(recent_data, key=lambda x: x["timestamp"])
+        packet_prefix = most_recent.get("packet_prefix", "unknown")
+        self.logger.debug(f"Using most recent RF data (fallback): {packet_prefix} at {most_recent['timestamp']}")
+        return most_recent, "recent_fallback"
+
     def find_recent_rf_data(
         self, correlation_key: str | None = None, max_age_seconds: float | None = None
     ) -> dict[str, Any] | None:
@@ -1254,57 +1357,7 @@ class MessageHandler:
                 - packet_prefix (from raw_hex[:32]) for RF data correlation
                 - pubkey_prefix (from message payload) for message correlation
         """
-        import time
-
-        current_time = time.time()
-
-        # Use default timeout if not specified
-        if max_age_seconds is None:
-            max_age_seconds = self.rf_data_timeout
-
-        # Filter recent RF data by age
-        recent_data = [data for data in self.recent_rf_data if current_time - data["timestamp"] < max_age_seconds]
-
-        if not recent_data:
-            self.logger.debug(f"No recent RF data found within {max_age_seconds}s window")
-            return None
-
-        # Strategy 1: Try exact packet prefix match first (for RF data correlation)
-        if correlation_key:
-            for data in recent_data:
-                rf_packet_prefix = data.get("packet_prefix", "") or ""
-                if rf_packet_prefix == correlation_key:
-                    self.logger.debug(f"Found exact packet prefix match: {rf_packet_prefix}")
-                    return data
-
-        # Strategy 2: Try pubkey prefix match (for message correlation)
-        if correlation_key:
-            for data in recent_data:
-                rf_pubkey_prefix = data.get("pubkey_prefix", "") or ""
-                if rf_pubkey_prefix == correlation_key:
-                    self.logger.debug(f"Found exact pubkey prefix match: {rf_pubkey_prefix}")
-                    return data
-
-        # Strategy 3: Try partial packet prefix matches
-        if correlation_key:
-            for data in recent_data:
-                rf_packet_prefix = data.get("packet_prefix", "") or ""
-                # Check for partial match (at least 16 characters)
-                min_length = min(len(rf_packet_prefix), len(correlation_key), 16)
-                if rf_packet_prefix[:min_length] == correlation_key[:min_length] and min_length >= 16:
-                    self.logger.debug(
-                        f"Found partial packet prefix match: {rf_packet_prefix[:16]}... matches {correlation_key[:16]}..."
-                    )
-                    return data
-
-        # Strategy 4: Use most recent data (fallback for timing issues)
-        if recent_data:
-            most_recent = max(recent_data, key=lambda x: x["timestamp"])
-            packet_prefix = most_recent.get("packet_prefix", "unknown")
-            self.logger.debug(f"Using most recent RF data (fallback): {packet_prefix} at {most_recent['timestamp']}")
-            return most_recent
-
-        return None
+        return self._find_recent_rf_data_ex(correlation_key, max_age_seconds=max_age_seconds)[0]
 
     def store_message_for_correlation(self, message_id: str, message_data: dict[str, Any]) -> None:
         """Store a message temporarily to wait for RF data correlation"""
@@ -1313,24 +1366,40 @@ class MessageHandler:
         self.pending_messages[message_id] = {"data": message_data, "timestamp": time.time(), "processed": False}
         self.logger.debug(f"Stored message {message_id} for RF data correlation")
 
-    def correlate_message_with_rf_data(self, message_id: str) -> dict[str, Any] | None:
-        """Try to correlate a stored message with available RF data"""
+    def _correlate_message_with_rf_data_ex(self, message_id: str) -> tuple[dict[str, Any] | None, str | None]:
+        """Correlate a stored message with RF data, packet-prefix-first.
+
+        Returns (data, correlation_kind) — provenance-preserving so callers
+        can distinguish trusted packet-level matches from weak pubkey ones.
+        """
         if message_id not in self.pending_messages:
-            return None
+            return None, None
 
         message_info = self.pending_messages[message_id]
         message_data = message_info["data"]
 
-        # Try to find RF data for this message
-        pubkey_prefix = message_data.get("pubkey_prefix", "")
-        rf_data = self.find_recent_rf_data(pubkey_prefix)
+        raw_hex = message_data.get("raw_hex", "") or ""
+        packet_prefix = raw_hex[:32] if raw_hex else ""
+        if packet_prefix:
+            rf_data, kind = self._find_recent_rf_data_ex(packet_prefix, key_kind="packet")
+            if rf_data is not None and kind in ("exact_packet", "partial_packet"):
+                self.logger.debug(f"Successfully correlated message {message_id} with RF data (packet-level)")
+                message_info["processed"] = True
+                return rf_data, kind
 
-        if rf_data:
-            self.logger.debug(f"Successfully correlated message {message_id} with RF data")
-            message_info["processed"] = True
-            return rf_data
+        pubkey_prefix = message_data.get("pubkey_prefix", "") or ""
+        if pubkey_prefix:
+            rf_data, kind = self._find_recent_rf_data_ex(pubkey_prefix, key_kind="pubkey")
+            if rf_data is not None:
+                self.logger.debug(f"Successfully correlated message {message_id} with RF data")
+                message_info["processed"] = True
+                return rf_data, kind
 
-        return None
+        return None, None
+
+    def correlate_message_with_rf_data(self, message_id: str) -> dict[str, Any] | None:
+        """Try to correlate a stored message with available RF data"""
+        return self._correlate_message_with_rf_data_ex(message_id)[0]
 
     def cleanup_old_messages(self) -> None:
         """Clean up old pending messages that couldn't be correlated"""
@@ -1910,40 +1979,56 @@ class MessageHandler:
                 f"Processing channel message from packet prefix: {message_packet_prefix}, pubkey: {message_pubkey}"
             )
 
-            # Enhanced RF data correlation with multiple strategies
-            recent_rf_data = None
+            # Enhanced RF data correlation with multiple strategies.
+            # correlation_kind tracks THIS lookup's provenance (never stored on
+            # the RF dict); only packet-level kinds may derive is_scoped_flood.
+            correlation_key = message_packet_prefix or message_pubkey
+            key_kind: Literal["packet", "pubkey"] = "packet" if message_packet_prefix else "pubkey"
 
-            # Strategy 1: Try immediate correlation using packet prefix
-            if message_packet_prefix:
-                recent_rf_data = self.find_recent_rf_data(message_packet_prefix)
-            elif message_pubkey:
-                # Fallback to pubkey correlation
-                recent_rf_data = self.find_recent_rf_data(message_pubkey)
+            # Strategy 1: Try immediate correlation using the typed key
+            recent_rf_data, correlation_kind = self._find_recent_rf_data_ex(correlation_key, key_kind=key_kind)
 
-            # Strategy 2: If no immediate match and enhanced correlation is enabled, store message and wait briefly
-            if not recent_rf_data and self.enhanced_correlation:
-                import time
-
-                correlation_key = message_packet_prefix or message_pubkey
-                message_id = f"{correlation_key}_{int(time.time() * 1000)}"
+            # Strategy 2: If the match is not packet-level and enhanced correlation
+            # is enabled, store the message and wait briefly for the RF packet.
+            # Skipped entirely when there is no correlation key (nothing to
+            # correlate against) or for old cached messages (dropped later anyway).
+            if (
+                correlation_key
+                and correlation_kind not in _TRUSTED_CORRELATION
+                and self.enhanced_correlation
+                and not self._is_old_cached_message(payload.get("sender_timestamp", 0))
+            ):
+                message_id = f"{correlation_key}_{next(self._correlation_seq)}"
                 self.store_message_for_correlation(message_id, payload)
+                retry_data = None
+                retry_kind = None
+                try:
+                    await asyncio.sleep(0.1)  # 100ms wait for RF data to arrive
+                    retry_data, retry_kind = self._correlate_message_with_rf_data_ex(message_id)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    # Correlation is best-effort: an ordinary retry failure degrades
+                    # to an untrusted result; it must not abort this message.
+                    self.logger.warning("Delayed RF correlation failed: %s", exc, exc_info=True)
+                finally:
+                    self.pending_messages.pop(message_id, None)  # one-shot entry, never leak
+                if retry_kind in _TRUSTED_CORRELATION:
+                    # Trusted upgrade only; a weak retry never overwrites anything
+                    recent_rf_data, correlation_kind = retry_data, retry_kind
 
-                # Wait a short time for RF data to arrive (non-blocking)
-                await asyncio.sleep(0.1)  # 100ms wait
-                recent_rf_data = self.correlate_message_with_rf_data(message_id)
-
-            # Strategy 3: Try with extended timeout if still no match
+            # Strategy 3: Try with extended timeout if still no match (diagnostics only)
             if not recent_rf_data:
                 extended_timeout = self.rf_data_timeout * 2  # Double the normal timeout
-                if message_packet_prefix:
-                    recent_rf_data = self.find_recent_rf_data(message_packet_prefix, max_age_seconds=extended_timeout)
-                elif message_pubkey:
-                    recent_rf_data = self.find_recent_rf_data(message_pubkey, max_age_seconds=extended_timeout)
+                if correlation_key:
+                    recent_rf_data, correlation_kind = self._find_recent_rf_data_ex(
+                        correlation_key, key_kind=key_kind, max_age_seconds=extended_timeout
+                    )
 
-            # Strategy 4: Use most recent RF data as last resort
+            # Strategy 4: Use most recent RF data as last resort (diagnostics only)
             if not recent_rf_data:
                 extended_timeout = self.rf_data_timeout * 2  # Double the normal timeout
-                recent_rf_data = self.find_recent_rf_data(max_age_seconds=extended_timeout)
+                recent_rf_data, correlation_kind = self._find_recent_rf_data_ex(max_age_seconds=extended_timeout)
 
             if recent_rf_data and recent_rf_data.get("raw_hex"):
                 raw_hex = recent_rf_data["raw_hex"]
@@ -2044,20 +2129,16 @@ class MessageHandler:
                         f"payload_type={scope_payload_type}"
                     )
 
-            # Allowlist enforcement: when flood_scopes is configured, only reply to
-            # messages whose scope matched an entry.  Unscoped FLOOD is allowed only
-            # when '*' (or equivalent) is explicitly listed.
-            cmd_mgr = getattr(self.bot, "command_manager", None)
-            scope_keys = getattr(cmd_mgr, "flood_scope_keys", {})
-            if scope_keys and reply_scope is None:
-                allow_global = getattr(cmd_mgr, "flood_scope_allow_global", False)
-                rt_for_check = recent_rf_data.get("route_type_int") if recent_rf_data else None
-                if rt_for_check == 0:
-                    self.logger.info("Ignoring TC_FLOOD: scope not in flood_scopes allowlist")
-                    return
-                elif not allow_global:
-                    self.logger.debug("Ignoring FLOOD: unscoped messages not permitted (add '*' to flood_scopes)")
-                    return
+            # Scope-hint signal: True=TC_FLOOD (scoped), False=plain FLOOD
+            # (unscoped), None=unknown. Only packet-level correlation may set
+            # it — a pubkey/fallback match can belong to a different packet.
+            is_scoped_flood: bool | None = None
+            if recent_rf_data and correlation_kind in _TRUSTED_CORRELATION:
+                _rt_scope = recent_rf_data.get("route_type_int")
+                if _rt_scope == RouteType.TRANSPORT_FLOOD.value:
+                    is_scoped_flood = True
+                elif _rt_scope == RouteType.FLOOD.value:
+                    is_scoped_flood = False
 
             # Get the full public key from contacts if available
             sender_pubkey = payload.get("pubkey_prefix", "")
@@ -2087,6 +2168,7 @@ class MessageHandler:
                 elapsed=_elapsed,
                 is_dm=False,
                 reply_scope=reply_scope,
+                is_scoped_flood=is_scoped_flood,
             )
             if recent_rf_data and recent_rf_data.get("routing_info"):
                 message.routing_info = recent_rf_data["routing_info"]
@@ -2104,7 +2186,9 @@ class MessageHandler:
             # Always attempt packet decoding and log the results for debugging
             await self._debug_decode_packet_for_message(message, sender_id, recent_rf_data)
 
-            # Check if this is an old cached message from before bot connection
+            # Check if this is an old cached message from before bot connection.
+            # This gate runs before any response-producing hook: a restart drains
+            # device-cached messages that must never trigger fresh warnings.
             timestamp = payload.get("sender_timestamp", 0)
             if self._is_old_cached_message(timestamp):
                 self.logger.debug(
@@ -2112,8 +2196,29 @@ class MessageHandler:
                 )
                 return  # Read the message to clear cache, but don't process it
 
-            # Process the message
+            # Allowlist enforcement: when flood_scopes is configured, only reply to
+            # messages whose scope matched an entry.  Unscoped FLOOD is allowed only
+            # when '*' (or equivalent) is explicitly listed. The scope_hint hook
+            # still observes messages the allowlist drops (transition-period nudge
+            # toward scoped routing); nothing else runs for them.
+            cmd_mgr = getattr(self.bot, "command_manager", None)
+            scope_keys = getattr(cmd_mgr, "flood_scope_keys", {})
+            if scope_keys and reply_scope is None:
+                allow_global = getattr(cmd_mgr, "flood_scope_allow_global", False)
+                rt_for_check = recent_rf_data.get("route_type_int") if recent_rf_data else None
+                if rt_for_check == 0:
+                    self.logger.info("Ignoring TC_FLOOD: scope not in flood_scopes allowlist")
+                    await self._maybe_scope_hint(message)
+                    return
+                elif not allow_global:
+                    self.logger.debug("Ignoring FLOOD: unscoped messages not permitted (add '*' to flood_scopes)")
+                    await self._maybe_scope_hint(message)
+                    return
+
+            # Process the message (the user's command response takes priority over
+            # the scope hint, which runs after and yields to global rate limits)
             await self.process_message(message)
+            await self._maybe_scope_hint(message)
 
             # Capture for web viewer live monitor
             if (
@@ -3146,8 +3251,13 @@ class MessageHandler:
                 # If no keyword or RandomLine match, try all other commands
                 await self.bot.command_manager.execute_commands(message)
 
-    def should_process_message(self, message: MeshMessage) -> bool:
-        """Check if message should be processed by the bot"""
+    def _baseline_response_eligible(self, message: MeshMessage) -> bool:
+        """Baseline policy shared by should_process_message() and automatic hooks.
+
+        Covers the checks every bot response must pass regardless of channel
+        monitoring: bot enabled, sender not banned, channel responses not
+        paused (non-DM), and hop distance within max_response_hops.
+        """
         # Check if bot is enabled
         if not self.bot.config.getboolean("Bot", "enabled"):
             return False
@@ -3174,6 +3284,39 @@ class MessageHandler:
                     return False
             except (TypeError, ValueError):
                 pass
+
+        return True
+
+    async def _maybe_scope_hint(self, message: MeshMessage) -> None:
+        """Run the scope_hint command for this channel message if eligible.
+
+        Never raises: the whole attempt is isolated so a scope-hint failure
+        cannot disturb ordinary message handling. Stats recording failures
+        are logged separately from execution failures.
+        """
+        try:
+            cmd = self.bot.command_manager.commands.get("scope_hint")
+            if cmd is None:
+                return
+            if not self._baseline_response_eligible(message):
+                return
+            if not cmd.should_execute(message):
+                return
+            success = await cmd.execute(message)
+        except Exception as e:
+            self.logger.error(f"Error executing scope_hint command: {e}")
+            return
+        try:
+            stats = self.bot.command_manager.commands.get("stats")
+            if stats:
+                stats.record_command(message, "scope_hint", success)
+        except Exception as e:
+            self.logger.error(f"scope_hint stats recording failed: {e}")
+
+    def should_process_message(self, message: MeshMessage) -> bool:
+        """Check if message should be processed by the bot"""
+        if not self._baseline_response_eligible(message):
+            return False
 
         # Check if channel is monitored (with command override support)
         if not message.is_dm and message.channel:

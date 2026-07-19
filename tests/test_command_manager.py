@@ -866,3 +866,141 @@ class TestGetMaxMessageLength:
             m_len = mgr.get_max_message_length(msg)
             b_len = cmd.get_max_message_length(msg)
             assert m_len == b_len, (bot_name, username, is_dm, reply_scope, m_len, b_len)
+
+
+# ---------------------------------------------------------------------------
+# automatic_hook_only exclusion from the generic pipeline (scope_hint)
+# ---------------------------------------------------------------------------
+
+def _hook_only_command():
+    cmd = Mock()
+    cmd.automatic_hook_only = True
+    cmd.name = "scope_hint"
+    cmd.keywords = []
+    cmd.should_execute = Mock(return_value=True)
+    cmd.execute = AsyncMock(return_value=True)
+    return cmd
+
+
+def _normal_command(name="dummy"):
+    cmd = Mock()
+    cmd.automatic_hook_only = False
+    cmd.name = name
+    cmd.keywords = [name]
+    cmd.should_execute = Mock(return_value=False)
+    cmd.execute = AsyncMock(return_value=True)
+    cmd.is_channel_allowed = Mock(return_value=True)
+    cmd.get_response_format = Mock(return_value=None)
+    return cmd
+
+
+class TestAutomaticHookOnlyExclusion:
+    def test_check_keywords_never_inspects_hook_only(self, cm_bot):
+        hook = _hook_only_command()
+        manager = make_manager(cm_bot, commands={"scope_hint": hook})
+        msg = mock_message(content="anything at all", channel="general", is_dm=False)
+        manager.check_keywords(msg)
+        hook.should_execute.assert_not_called()
+
+    async def test_execute_commands_never_runs_hook_only(self, cm_bot):
+        hook = _hook_only_command()
+        normal = _normal_command()
+        manager = make_manager(cm_bot, commands={"scope_hint": hook, "dummy": normal})
+        msg = mock_message(content="dummy", channel="general", is_dm=False)
+        await manager.execute_commands(msg)
+        hook.should_execute.assert_not_called()
+        hook.execute.assert_not_awaited()
+        # the normal command was still evaluated
+        normal.should_execute.assert_called()
+
+    async def test_raising_hook_only_guard_cannot_disturb_pipeline(self, cm_bot):
+        hook = _hook_only_command()
+        hook.should_execute = Mock(side_effect=RuntimeError("must never be called"))
+        manager = make_manager(cm_bot, commands={"scope_hint": hook})
+        msg = mock_message(content="ping", channel="general", is_dm=False)
+        matches = manager.check_keywords(msg)  # must not raise
+        assert any(trigger == "ping" for trigger, _ in matches)
+        await manager.execute_commands(msg)  # must not raise
+
+    def test_real_scope_hint_command_is_hook_only(self):
+        from modules.commands.scope_hint_command import ScopeHintCommand
+        assert ScopeHintCommand.automatic_hook_only is True
+        from modules.commands.base_command import BaseCommand
+        assert BaseCommand.automatic_hook_only is False
+
+
+# ---------------------------------------------------------------------------
+# Rate-limit admission/accounting split (scope_hint contract)
+# ---------------------------------------------------------------------------
+
+class TestRateLimitSplit:
+    def _manager(self, cm_bot):
+        cm_bot.bot_tx_rate_limiter.wait_for_tx = AsyncMock()
+        cm_bot.per_user_rate_limit_enabled = True
+        cm_bot.per_user_rate_limiter = Mock()
+        cm_bot.per_user_rate_limiter.can_send = Mock(return_value=True)
+        cm_bot.per_user_rate_limiter.record_send = Mock()
+        cm_bot.channel_rate_limiter = None
+        cm_bot.tx_delay_ms = 0
+        return make_manager(cm_bot)
+
+    async def test_global_admission_applies_with_skip_per_user(self, cm_bot):
+        # Hints must yield to real traffic: the bot-wide limiter still gates them
+        manager = self._manager(cm_bot)
+        cm_bot.rate_limiter.can_send = Mock(return_value=False)
+        cm_bot.rate_limiter.time_until_next = Mock(return_value=10.0)
+        can_send, reason = await manager._check_rate_limits(
+            skip_per_user_rate_limit=True, rate_limit_key="alice"
+        )
+        assert can_send is False
+
+    async def test_per_user_admission_skipped_with_flag(self, cm_bot):
+        manager = self._manager(cm_bot)
+        cm_bot.per_user_rate_limiter.can_send = Mock(return_value=False)
+        can_send, _ = await manager._check_rate_limits(
+            skip_per_user_rate_limit=True, rate_limit_key="alice"
+        )
+        assert can_send is True
+        cm_bot.per_user_rate_limiter.can_send.assert_not_called()
+
+    async def test_per_user_admission_applies_without_flag(self, cm_bot):
+        manager = self._manager(cm_bot)
+        cm_bot.per_user_rate_limiter.can_send = Mock(return_value=False)
+        cm_bot.per_user_rate_limiter.time_until_next = Mock(return_value=30.0)
+        can_send, reason = await manager._check_rate_limits(rate_limit_key="alice")
+        assert can_send is False
+
+    async def test_legacy_combined_flag_still_skips_both(self, cm_bot):
+        manager = self._manager(cm_bot)
+        cm_bot.rate_limiter.can_send = Mock(return_value=False)
+        can_send, _ = await manager._check_rate_limits(
+            skip_user_rate_limit=True, rate_limit_key="alice"
+        )
+        assert can_send is True
+
+    def _ok_result(self):
+        from meshcore import EventType
+        result = Mock()
+        result.type = EventType.MSG_SENT
+        return result
+
+    def test_accounting_skips_per_user_when_disabled(self, cm_bot):
+        manager = self._manager(cm_bot)
+        success = manager._handle_send_result(
+            self._ok_result(), "Channel message", "general",
+            rate_limit_key="alice", record_user_rate_limit=False,
+        )
+        assert success is True
+        # real airtime still recorded globally
+        cm_bot.rate_limiter.record_send.assert_called_once()
+        cm_bot.bot_tx_rate_limiter.record_tx.assert_called_once()
+        # sender's budget untouched
+        cm_bot.per_user_rate_limiter.record_send.assert_not_called()
+
+    def test_accounting_records_per_user_by_default(self, cm_bot):
+        manager = self._manager(cm_bot)
+        success = manager._handle_send_result(
+            self._ok_result(), "Channel message", "general", rate_limit_key="alice",
+        )
+        assert success is True
+        cm_bot.per_user_rate_limiter.record_send.assert_called_once_with("alice")

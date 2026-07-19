@@ -323,7 +323,7 @@ class CommandManager:
 
     async def _check_rate_limits(
         self, skip_user_rate_limit: bool = False, rate_limit_key: str | None = None,
-        channel: str | None = None,
+        channel: str | None = None, skip_per_user_rate_limit: bool = False,
     ) -> tuple[bool, str]:
         """Check all rate limits before sending.
 
@@ -331,9 +331,13 @@ class CommandManager:
         limits. Also applies transmission delays if configured.
 
         Args:
-            skip_user_rate_limit: If True, skip the user rate limiter check (for automated responses).
+            skip_user_rate_limit: If True, skip BOTH the global and per-user rate
+                limiter admission checks (legacy combined flag for automated responses).
             rate_limit_key: Optional key for per-user rate limit (e.g. from get_rate_limit_key(message)).
             channel: Optional channel name for per-channel rate limit check.
+            skip_per_user_rate_limit: If True, skip ONLY the sender-specific
+                admission check; the global limiter still applies (used by
+                automatic hints that must yield to real traffic).
 
         Returns:
             Tuple[bool, str]: A tuple containing:
@@ -349,7 +353,7 @@ class CommandManager:
                 return False, ""
             # Per-user rate limit when enabled and key present.
             # Admin ACL controls command authorization only; it does not bypass send rate limits.
-            if getattr(self.bot, 'per_user_rate_limit_enabled', False) and rate_limit_key:
+            if not skip_per_user_rate_limit and getattr(self.bot, 'per_user_rate_limit_enabled', False) and rate_limit_key:
                 per_user = getattr(self.bot, 'per_user_rate_limiter', None)
                 if per_user and not per_user.can_send(rate_limit_key):
                     wait_time = per_user.time_until_next(rate_limit_key)
@@ -390,6 +394,7 @@ class CommandManager:
         target: str,
         used_retry_method: bool = False,
         rate_limit_key: str | None = None,
+        record_user_rate_limit: bool = True,
     ) -> bool:
         """Handle result from message send operations.
 
@@ -399,6 +404,9 @@ class CommandManager:
             target: Recipient name or channel name for logging.
             used_retry_method: True if send_msg_with_retry was used (affects logging).
             rate_limit_key: Optional key for per-user rate limit recording.
+            record_user_rate_limit: If False, do not record this send against the
+                per-user limiter (automatic hints must not consume the sender's
+                budget); global and TX accounting still reflect real airtime.
 
         Returns:
             bool: True if send succeeded (ACK received or sent successfully), False otherwise.
@@ -423,7 +431,7 @@ class CommandManager:
                     self.logger.info(f"✅ {operation_name} sent to {target}")
                 self.bot.rate_limiter.record_send()
                 self.bot.bot_tx_rate_limiter.record_tx()
-                if getattr(self.bot, 'per_user_rate_limit_enabled', False) and rate_limit_key:
+                if record_user_rate_limit and getattr(self.bot, 'per_user_rate_limit_enabled', False) and rate_limit_key:
                     per_user = getattr(self.bot, 'per_user_rate_limiter', None)
                     if per_user:
                         per_user.record_send(rate_limit_key)
@@ -673,6 +681,11 @@ class CommandManager:
 
         # Check all loaded plugins for matches
         for command_name, command in self.commands.items():
+            # Hook-only commands are invoked exclusively by dedicated handler
+            # hooks; never inspect them here (their custom should_execute() is
+            # not keyword-based and must not run in the generic pipeline).
+            if getattr(command, 'automatic_hook_only', False):
+                continue
             if command.should_execute(message):
                 # Check if we should queue instead of skip (for global cooldowns near expiring)
                 should_queue, remaining = self._should_queue_command(command, message)
@@ -1061,6 +1074,8 @@ class CommandManager:
         skip_user_rate_limit: bool = False,
         rate_limit_key: str | None = None,
         scope: str | None = None,
+        skip_per_user_rate_limit: bool = False,
+        record_user_rate_limit: bool = True,
     ) -> bool:
         """Send a channel message using meshcore_py (optional flood scope).
 
@@ -1084,7 +1099,7 @@ class CommandManager:
         # Check all rate limits (including per-channel)
         can_send, reason = await self._check_rate_limits(
             skip_user_rate_limit=skip_user_rate_limit, rate_limit_key=rate_limit_key,
-            channel=channel,
+            channel=channel, skip_per_user_rate_limit=skip_per_user_rate_limit,
         )
         if not can_send:
             if reason:
@@ -1152,7 +1167,8 @@ class CommandManager:
 
             # Handle result using unified handler
             success = self._handle_send_result(
-                result, "Channel message", target, rate_limit_key=rate_limit_key
+                result, "Channel message", target, rate_limit_key=rate_limit_key,
+                record_user_rate_limit=record_user_rate_limit,
             )
             if success:
                 ch_limiter = getattr(self.bot, 'channel_rate_limiter', None)
@@ -1418,7 +1434,10 @@ class CommandManager:
 
         return commands_list
 
-    async def send_response(self, message: MeshMessage, content: str, skip_user_rate_limit: bool = False) -> bool:
+    async def send_response(
+        self, message: MeshMessage, content: str, skip_user_rate_limit: bool = False,
+        skip_per_user_rate_limit: bool = False, record_user_rate_limit: bool = True,
+    ) -> bool:
         """Unified method for sending responses to users.
 
         Automatically determines whether to send a DM or channel message based
@@ -1427,7 +1446,12 @@ class CommandManager:
         Args:
             message: The original message being responded to.
             content: The response content.
-            skip_user_rate_limit: If True, skip the user rate limiter check (for automated responses).
+            skip_user_rate_limit: If True, skip BOTH global and per-user admission
+                checks (legacy combined flag for automated responses).
+            skip_per_user_rate_limit: If True, skip only the sender-specific
+                admission check; the global limiter still applies.
+            record_user_rate_limit: If False, a successful send is not recorded
+                against the sender's per-user limiter.
 
         Returns:
             bool: True if response was sent successfully, False otherwise.
@@ -1452,6 +1476,8 @@ class CommandManager:
                     skip_user_rate_limit=skip_user_rate_limit,
                     rate_limit_key=rate_limit_key,
                     scope=getattr(message, 'reply_scope', None),
+                    skip_per_user_rate_limit=skip_per_user_rate_limit,
+                    record_user_rate_limit=record_user_rate_limit,
                 )
         except Exception as e:
             self.logger.error(f"Failed to send response: {e}")
@@ -1565,6 +1591,11 @@ class CommandManager:
 
         # Check each command to see if it should execute
         for command_name, command in self.commands.items():
+            # Hook-only commands are invoked exclusively by dedicated handler
+            # hooks; the generic pipeline must never evaluate or execute them
+            # (prevents double-fire and keeps their guards isolated).
+            if getattr(command, 'automatic_hook_only', False):
+                continue
             # Skip commands not allowed in this channel (silent - no stats, no error)
             # This mirrors the check_keywords() path which calls can_execute() before matching.
             # Messages may reach execute_commands() via a per-command channel override (e.g.

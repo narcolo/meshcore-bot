@@ -30,6 +30,10 @@ class BaseCommand(ABC):
     requires_internet: bool = False  # Set to True if command needs internet access
     cooldown_seconds: int = 0
     category: str = "general"
+    # True: invoked only by dedicated handler hooks (e.g. scope_hint); the
+    # generic pipeline (check_keywords / execute_commands) must skip it so a
+    # custom should_execute() is never evaluated or double-fired there.
+    automatic_hook_only: bool = False
 
     # Documentation fields - to be overridden by subclasses for website generation
     short_description: str = ""  # Brief description for website (without usage syntax)
@@ -505,20 +509,32 @@ class BaseCommand(ABC):
             'module_name': self.__class__.__module__
         }
 
-    async def send_response(self, message: MeshMessage, content: str, skip_user_rate_limit: bool = False) -> bool:
+    async def send_response(
+        self, message: MeshMessage, content: str, skip_user_rate_limit: bool = False,
+        skip_per_user_rate_limit: bool = False, record_user_rate_limit: bool = True,
+    ) -> bool:
         """Unified method for sending responses to users.
 
         Args:
             message: The message to respond to.
             content: The response content.
-            skip_user_rate_limit: If True, skip the user rate limiter check (for automated responses).
+            skip_user_rate_limit: If True, skip BOTH global and per-user admission
+                checks (legacy combined flag for automated responses).
+            skip_per_user_rate_limit: If True, skip only the sender-specific
+                admission check; the global limiter still applies.
+            record_user_rate_limit: If False, a successful send is not recorded
+                against the sender's per-user limiter.
 
         Returns:
             bool: True if the response was sent successfully, False otherwise.
         """
         try:
             # Use the command manager's send_response method to ensure response capture
-            return await self.bot.command_manager.send_response(message, content, skip_user_rate_limit=skip_user_rate_limit)
+            return await self.bot.command_manager.send_response(
+                message, content, skip_user_rate_limit=skip_user_rate_limit,
+                skip_per_user_rate_limit=skip_per_user_rate_limit,
+                record_user_rate_limit=record_user_rate_limit,
+            )
         except Exception as e:
             self.logger.error(f"Failed to send response: {e}")
             return False

@@ -263,6 +263,55 @@ def validate_config(config_path: str) -> list[tuple[str, str]]:
                     f"  {PUBLIC_CHANNEL_OVERRIDE_KEY} = true",
                 ))
 
+    # Scope_Hint_Command guards: it deliberately works outside monitor_channels,
+    # so it needs the same Public override, and its warning about unscoped
+    # traffic must not itself be sent as unscoped global FLOOD unless the
+    # operator explicitly accepts that (allow_unscoped_response = true).
+    if config.has_section("Scope_Hint_Command") and config.getboolean(
+        "Scope_Hint_Command", "enabled", fallback=False
+    ):
+        hint_channel = config.get("Scope_Hint_Command", "channel", fallback="Public").strip()
+        if _channel_name_is_public(hint_channel):
+            override = config.get("Bot", PUBLIC_CHANNEL_OVERRIDE_KEY, fallback="").strip().lower()
+            if override != "true":
+                results.append((
+                    SEVERITY_ERROR,
+                    "Scope_Hint_Command is enabled for the Public channel. Running a bot "
+                    "on Public is disruptive to other mesh users. To override, add to [Bot]:\n"
+                    f"  {PUBLIC_CHANNEL_OVERRIDE_KEY} = true",
+                ))
+
+        def _is_global_scope_marker(value: str) -> bool:
+            return value in ("", "*", "0", "None")
+
+        response_scope = (config.get("Scope_Hint_Command", "response_scope", fallback="") or "").strip()
+        outgoing_override = (
+            config.get("Channels", "outgoing_flood_scope_override", fallback="") or ""
+        ).strip() if config.has_section("Channels") else ""
+        # Explicit global response_scope beats a named outgoing override
+        if response_scope:
+            effective_is_global = _is_global_scope_marker(response_scope)
+        else:
+            effective_is_global = _is_global_scope_marker(outgoing_override)
+        allow_unscoped = config.getboolean(
+            "Scope_Hint_Command", "allow_unscoped_response", fallback=False
+        )
+        if effective_is_global and not allow_unscoped:
+            results.append((
+                SEVERITY_ERROR,
+                "Scope_Hint_Command is enabled without a named response scope: the "
+                "warning about unscoped traffic would itself be sent as unscoped "
+                "global FLOOD. Set [Scope_Hint_Command] response_scope (e.g. "
+                "#pl-podlasie), or [Channels] outgoing_flood_scope_override, or "
+                "explicitly accept this with allow_unscoped_response = true.",
+            ))
+        elif effective_is_global and allow_unscoped:
+            results.append((
+                SEVERITY_WARNING,
+                "Scope_Hint_Command will send its unscoped-routing warning as "
+                "unscoped global FLOOD (allow_unscoped_response = true).",
+            ))
+
     prefix_to_section: Optional[dict[str, str]] = None
 
     for section in config.sections():

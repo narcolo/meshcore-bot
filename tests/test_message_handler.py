@@ -1953,3 +1953,482 @@ class TestHandleNewContactAutoManage:
         await handler.handle_new_contact(ev, None)
         rm.add_companion_from_contact_data.assert_awaited_once()
         mesh.commands.add_contact.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Typed RF correlation (_find_recent_rf_data_ex) — scope-hint trust boundary
+# ---------------------------------------------------------------------------
+
+PKT_PREFIX = "aa11bb22cc33dd44ee55ff6600112233"  # 32 valid hex chars
+OTHER_PKT = "99887766554433221100aabbccddeeff"
+
+
+def _rf(packet_prefix=PKT_PREFIX, pubkey_prefix="abcdef123456", route_type=1, ts=None):
+    return {
+        "timestamp": ts if ts is not None else time.time(),
+        "packet_prefix": packet_prefix,
+        "pubkey_prefix": pubkey_prefix,
+        "route_type_int": route_type,
+        "snr": 5,
+        "rssi": -80,
+    }
+
+
+class TestFindRecentRfDataEx:
+    """Typed correlation kinds and the structural packet/pubkey boundary."""
+
+    def test_exact_packet_match_with_packet_kind(self, handler):
+        handler.recent_rf_data = [_rf()]
+        data, kind = handler._find_recent_rf_data_ex(PKT_PREFIX, key_kind="packet")
+        assert kind == "exact_packet"
+        assert data["packet_prefix"] == PKT_PREFIX
+
+    def test_partial_packet_match_with_packet_kind(self, handler):
+        handler.recent_rf_data = [_rf()]
+        partial_key = PKT_PREFIX[:20]  # >= 16 hex chars, shares 16-char prefix
+        data, kind = handler._find_recent_rf_data_ex(partial_key, key_kind="packet")
+        assert kind == "partial_packet"
+
+    def test_pubkey_kind_can_never_return_packet_kinds(self, handler):
+        # Type-confusion guard: a pubkey value equal to a packet_prefix must
+        # not earn packet-level trust.
+        handler.recent_rf_data = [_rf(pubkey_prefix="feedface")]
+        data, kind = handler._find_recent_rf_data_ex(PKT_PREFIX, key_kind="pubkey")
+        assert kind == "recent_fallback"
+
+    def test_pubkey_kind_exact_pubkey(self, handler):
+        handler.recent_rf_data = [_rf(pubkey_prefix="feedface")]
+        data, kind = handler._find_recent_rf_data_ex("feedface", key_kind="pubkey")
+        assert kind == "exact_pubkey"
+
+    def test_long_pubkey_sharing_packet_prefix_not_trusted(self, handler):
+        # Long pubkey key that shares the first 16 chars with a packet prefix
+        handler.recent_rf_data = [_rf(pubkey_prefix="feedface")]
+        lookalike = PKT_PREFIX[:16] + "0000000000000000"
+        data, kind = handler._find_recent_rf_data_ex(lookalike, key_kind="pubkey")
+        assert kind == "recent_fallback"
+
+    def test_malformed_packet_key_not_trusted(self, handler):
+        handler.recent_rf_data = [_rf(packet_prefix="zz11bb22cc33dd44ee55ff6600112233")]
+        data, kind = handler._find_recent_rf_data_ex(
+            "zz11bb22cc33dd44ee55ff6600112233", key_kind="packet"
+        )
+        assert kind == "recent_fallback"
+
+    def test_short_packet_key_not_trusted(self, handler):
+        handler.recent_rf_data = [_rf(packet_prefix="aabb")]
+        data, kind = handler._find_recent_rf_data_ex("aabb", key_kind="packet")
+        assert kind == "recent_fallback"
+
+    def test_no_data_returns_none_none(self, handler):
+        handler.recent_rf_data = []
+        assert handler._find_recent_rf_data_ex(PKT_PREFIX, key_kind="packet") == (None, None)
+
+    def test_fallback_is_most_recent(self, handler):
+        old = _rf(packet_prefix=OTHER_PKT, ts=time.time() - 5)
+        new = _rf(packet_prefix=PKT_PREFIX, ts=time.time())
+        handler.recent_rf_data = [old, new]
+        data, kind = handler._find_recent_rf_data_ex("0000000000000000", key_kind="packet")
+        assert kind == "recent_fallback"
+        assert data["packet_prefix"] == PKT_PREFIX
+
+    def test_lookup_does_not_mutate_cached_dicts(self, handler):
+        rf = _rf()
+        before = dict(rf)
+        handler.recent_rf_data = [rf]
+        handler._find_recent_rf_data_ex(PKT_PREFIX, key_kind="packet")
+        handler._find_recent_rf_data_ex("feedface", key_kind="pubkey")
+        handler._find_recent_rf_data_ex(max_age_seconds=60)
+        assert rf == before  # no correlation metadata written into the cache
+
+    def test_legacy_wrapper_returns_data_only(self, handler):
+        handler.recent_rf_data = [_rf()]
+        data = handler.find_recent_rf_data(PKT_PREFIX)
+        assert data is not None and data["packet_prefix"] == PKT_PREFIX
+
+    def test_legacy_wrapper_keeps_fallback_behavior(self, handler):
+        handler.recent_rf_data = [_rf()]
+        data = handler.find_recent_rf_data("no-such-key-1234")
+        assert data is not None  # historic most-recent fallback preserved
+
+
+class TestCorrelateMessageWithRfDataEx:
+    """Packet-prefix-first pending-message correlation."""
+
+    def test_packet_prefix_preferred_over_pubkey(self, handler):
+        handler.recent_rf_data = [
+            _rf(packet_prefix=PKT_PREFIX, pubkey_prefix="feedface", route_type=1),
+        ]
+        handler.store_message_for_correlation(
+            "m1", {"raw_hex": PKT_PREFIX + "beef", "pubkey_prefix": "feedface"}
+        )
+        data, kind = handler._correlate_message_with_rf_data_ex("m1")
+        assert kind == "exact_packet"
+
+    def test_pubkey_fallback_when_no_raw_hex(self, handler):
+        handler.recent_rf_data = [_rf(pubkey_prefix="feedface")]
+        handler.store_message_for_correlation("m2", {"pubkey_prefix": "feedface"})
+        data, kind = handler._correlate_message_with_rf_data_ex("m2")
+        assert kind == "exact_pubkey"
+
+    def test_two_packets_same_pubkey_different_route_types(self, handler):
+        # One companion sent a scoped and an unscoped packet in the window:
+        # pubkey-only correlation must not be trusted for the route type.
+        handler.recent_rf_data = [
+            _rf(packet_prefix=OTHER_PKT, pubkey_prefix="feedface", route_type=0, ts=time.time() - 1),
+            _rf(packet_prefix=PKT_PREFIX, pubkey_prefix="feedface", route_type=1, ts=time.time()),
+        ]
+        handler.store_message_for_correlation("m3", {"pubkey_prefix": "feedface"})
+        data, kind = handler._correlate_message_with_rf_data_ex("m3")
+        assert kind == "exact_pubkey"  # untrusted for is_scoped_flood
+
+    def test_unknown_message_id(self, handler):
+        assert handler._correlate_message_with_rf_data_ex("nope") == (None, None)
+
+
+# ---------------------------------------------------------------------------
+# _baseline_response_eligible and _maybe_scope_hint
+# ---------------------------------------------------------------------------
+
+class TestBaselineResponseEligible:
+    def _msg(self, **kw):
+        defaults = dict(content="hi", sender_id="Alice", channel="general", is_dm=False)
+        defaults.update(kw)
+        return MeshMessage(**defaults)
+
+    def test_eligible_by_default(self, handler):
+        handler.bot.channel_responses_enabled = True
+        assert handler._baseline_response_eligible(self._msg()) is True
+
+    def test_disabled_bot_blocks(self, handler):
+        handler.bot.config.set("Bot", "enabled", "false")
+        assert handler._baseline_response_eligible(self._msg()) is False
+
+    def test_banned_sender_blocks(self, handler):
+        handler.bot.channel_responses_enabled = True
+        handler.bot.command_manager.is_user_banned = Mock(return_value=True)
+        assert handler._baseline_response_eligible(self._msg()) is False
+
+    def test_paused_channel_responses_block(self, handler):
+        handler.bot.channel_responses_enabled = False
+        assert handler._baseline_response_eligible(self._msg()) is False
+
+    def test_excess_hops_block(self, handler):
+        handler.bot.channel_responses_enabled = True
+        handler.bot.config.set("Channels", "max_response_hops", "3")
+        assert handler._baseline_response_eligible(self._msg(hops=4)) is False
+        assert handler._baseline_response_eligible(self._msg(hops=3)) is True
+
+    def test_should_process_message_still_enforces_baseline(self, handler):
+        handler.bot.config.set("Bot", "enabled", "false")
+        assert handler.should_process_message(self._msg()) is False
+
+
+class TestMaybeScopeHint:
+    def _msg(self):
+        return MeshMessage(
+            content="hi", sender_id="Alice", channel="general",
+            is_dm=False, is_scoped_flood=False,
+        )
+
+    def _hint_cmd(self, should=True, success=True):
+        cmd = Mock()
+        cmd.should_execute = Mock(return_value=should)
+        cmd.execute = AsyncMock(return_value=success)
+        return cmd
+
+    async def test_runs_and_records_stats(self, handler):
+        handler.bot.channel_responses_enabled = True
+        cmd = self._hint_cmd()
+        stats = Mock()
+        handler.bot.command_manager.commands = {"scope_hint": cmd, "stats": stats}
+        await handler._maybe_scope_hint(self._msg())
+        cmd.execute.assert_awaited_once()
+        stats.record_command.assert_called_once()
+        assert stats.record_command.call_args.args[1] == "scope_hint"
+
+    async def test_no_command_registered_is_noop(self, handler):
+        handler.bot.command_manager.commands = {}
+        await handler._maybe_scope_hint(self._msg())  # must not raise
+
+    async def test_baseline_ineligible_skips(self, handler):
+        handler.bot.config.set("Bot", "enabled", "false")
+        cmd = self._hint_cmd()
+        handler.bot.command_manager.commands = {"scope_hint": cmd}
+        await handler._maybe_scope_hint(self._msg())
+        cmd.should_execute.assert_not_called()
+        cmd.execute.assert_not_awaited()
+
+    async def test_should_execute_false_skips(self, handler):
+        handler.bot.channel_responses_enabled = True
+        cmd = self._hint_cmd(should=False)
+        handler.bot.command_manager.commands = {"scope_hint": cmd}
+        await handler._maybe_scope_hint(self._msg())
+        cmd.execute.assert_not_awaited()
+
+    async def test_should_execute_exception_contained(self, handler):
+        handler.bot.channel_responses_enabled = True
+        cmd = self._hint_cmd()
+        cmd.should_execute = Mock(side_effect=RuntimeError("boom"))
+        handler.bot.command_manager.commands = {"scope_hint": cmd}
+        await handler._maybe_scope_hint(self._msg())  # must not raise
+        cmd.execute.assert_not_awaited()
+
+    async def test_execute_exception_contained(self, handler):
+        handler.bot.channel_responses_enabled = True
+        cmd = self._hint_cmd()
+        cmd.execute = AsyncMock(side_effect=RuntimeError("boom"))
+        stats = Mock()
+        handler.bot.command_manager.commands = {"scope_hint": cmd, "stats": stats}
+        await handler._maybe_scope_hint(self._msg())  # must not raise
+        stats.record_command.assert_not_called()
+
+    async def test_stats_exception_contained(self, handler):
+        handler.bot.channel_responses_enabled = True
+        cmd = self._hint_cmd()
+        stats = Mock()
+        stats.record_command = Mock(side_effect=RuntimeError("stats down"))
+        handler.bot.command_manager.commands = {"scope_hint": cmd, "stats": stats}
+        await handler._maybe_scope_hint(self._msg())  # must not raise
+        cmd.execute.assert_awaited_once()
+
+
+# ---------------------------------------------------------------------------
+# Delayed correlation path in handle_channel_message (scope-hint derivation)
+# ---------------------------------------------------------------------------
+
+class TestDelayedCorrelationPath:
+    """One-shot pending lifecycle, trusted upgrades, and is_scoped_flood."""
+
+    def _setup(self, handler, enhanced=True):
+        handler.logger = Mock()
+        handler.bot.meshcore = Mock()
+        handler.bot.meshcore.contacts = {}
+        handler.bot.channel_manager = Mock()
+        handler.bot.channel_manager.get_channel_name = Mock(return_value="general")
+        handler.bot.translator = None
+        handler.bot.mesh_graph = None
+        handler.bot.connection_time = None
+        handler.recent_rf_data = []
+        handler.enhanced_correlation = enhanced
+        handler.bot.command_manager.flood_scope_keys = {}
+        handler.bot.command_manager.commands = {}
+
+    def _event(self, raw_hex=None, sender_ts=None):
+        payload = {
+            "channel_idx": 0,
+            "text": "ALICE: hello",
+            "path_len": 255,
+            "sender_timestamp": sender_ts if sender_ts is not None else int(time.time()),
+        }
+        if raw_hex is not None:
+            payload["raw_hex"] = raw_hex
+        event = Mock()
+        event.payload = payload
+        return event
+
+    async def _run(self, handler, event):
+        captured = {}
+
+        async def capture(msg):
+            captured["msg"] = msg
+
+        with patch.object(handler, "process_message", side_effect=capture):
+            with patch.object(handler, "_debug_decode_message_path", new_callable=AsyncMock):
+                with patch.object(handler, "_debug_decode_packet_for_message", new_callable=AsyncMock):
+                    await handler.handle_channel_message(event)
+        return captured.get("msg")
+
+    async def test_no_correlation_key_skips_wait_and_pending(self, handler):
+        self._setup(handler)
+        with patch("modules.message_handler.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            msg = await self._run(handler, self._event(raw_hex=None))
+        assert msg is not None  # still reaches normal processing
+        assert msg.is_scoped_flood is None
+        assert handler.pending_messages == {}
+        mock_sleep.assert_not_awaited()  # no 100ms wait without a key
+
+    async def test_trusted_exact_match_derives_unscoped(self, handler):
+        self._setup(handler)
+        raw = "aa11bb22cc33dd44ee55ff6600112233" + "beef"
+        handler.recent_rf_data = [{
+            "timestamp": time.time(),
+            "packet_prefix": raw[:32],
+            "pubkey_prefix": "feedface",
+            "route_type_int": 1,  # plain FLOOD
+        }]
+        msg = await self._run(handler, self._event(raw_hex=raw))
+        assert msg is not None
+        assert msg.is_scoped_flood is False
+        assert handler.pending_messages == {}
+
+    async def test_trusted_exact_match_derives_scoped(self, handler):
+        self._setup(handler)
+        raw = "aa11bb22cc33dd44ee55ff6600112233" + "beef"
+        handler.recent_rf_data = [{
+            "timestamp": time.time(),
+            "packet_prefix": raw[:32],
+            "pubkey_prefix": "feedface",
+            "route_type_int": 0,  # TC_FLOOD
+        }]
+        msg = await self._run(handler, self._event(raw_hex=raw))
+        assert msg.is_scoped_flood is True
+
+    async def test_weak_fallback_before_and_after_wait_stays_unknown(self, handler):
+        self._setup(handler)
+        raw = "aa11bb22cc33dd44ee55ff6600112233" + "beef"
+        # Only an unrelated record exists — initial and retry are both weak
+        handler.recent_rf_data = [{
+            "timestamp": time.time(),
+            "packet_prefix": "99887766554433221100aabbccddeeff",
+            "pubkey_prefix": "other",
+            "route_type_int": 1,
+        }]
+        msg = await self._run(handler, self._event(raw_hex=raw))
+        assert msg is not None
+        assert msg.is_scoped_flood is None  # weak correlation never derives
+        assert handler.pending_messages == {}  # one-shot entry cleaned up
+
+    async def test_exact_packet_arriving_during_wait_upgrades(self, handler):
+        self._setup(handler)
+        raw = "aa11bb22cc33dd44ee55ff6600112233" + "beef"
+        # Unrelated record initially; the matching packet arrives mid-wait
+        handler.recent_rf_data = [{
+            "timestamp": time.time(),
+            "packet_prefix": "99887766554433221100aabbccddeeff",
+            "pubkey_prefix": "other",
+            "route_type_int": 0,
+        }]
+
+        async def sleep_and_inject(_delay):
+            handler.recent_rf_data.append({
+                "timestamp": time.time(),
+                "packet_prefix": raw[:32],
+                "pubkey_prefix": "feedface",
+                "route_type_int": 1,  # the real packet: plain FLOOD
+            })
+
+        with patch("modules.message_handler.asyncio.sleep", side_effect=sleep_and_inject):
+            msg = await self._run(handler, self._event(raw_hex=raw))
+        assert msg is not None
+        assert msg.is_scoped_flood is False  # upgraded to the exact record
+        assert handler.pending_messages == {}
+
+    async def test_retry_exception_isolated_and_pending_cleaned(self, handler):
+        self._setup(handler)
+        raw = "aa11bb22cc33dd44ee55ff6600112233" + "beef"
+        handler.recent_rf_data = [{
+            "timestamp": time.time(),
+            "packet_prefix": "99887766554433221100aabbccddeeff",
+            "pubkey_prefix": "other",
+            "route_type_int": 1,
+        }]
+        with patch.object(
+            handler, "_correlate_message_with_rf_data_ex", side_effect=RuntimeError("boom")
+        ):
+            msg = await self._run(handler, self._event(raw_hex=raw))
+        assert msg is not None  # normal processing continued
+        assert msg.is_scoped_flood is None
+        assert handler.pending_messages == {}
+
+    async def test_cancellation_cleans_pending_and_propagates(self, handler):
+        self._setup(handler)
+        raw = "aa11bb22cc33dd44ee55ff6600112233" + "beef"
+        handler.recent_rf_data = [{
+            "timestamp": time.time(),
+            "packet_prefix": "99887766554433221100aabbccddeeff",
+            "pubkey_prefix": "other",
+            "route_type_int": 1,
+        }]
+        import asyncio as _asyncio
+        with patch(
+            "modules.message_handler.asyncio.sleep",
+            side_effect=_asyncio.CancelledError,
+        ):
+            with pytest.raises(_asyncio.CancelledError):
+                await self._run(handler, self._event(raw_hex=raw))
+        assert handler.pending_messages == {}
+
+    async def test_old_cached_message_skips_wait_and_never_processed(self, handler):
+        self._setup(handler)
+        handler.bot.connection_time = time.time()
+        raw = "aa11bb22cc33dd44ee55ff6600112233" + "beef"
+        old_ts = int(time.time() - 3600)
+        with patch("modules.message_handler.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            msg = await self._run(handler, self._event(raw_hex=raw, sender_ts=old_ts))
+        assert msg is None  # old cached: never reaches process_message
+        assert handler.pending_messages == {}
+        mock_sleep.assert_not_awaited()
+
+    async def test_correlation_ids_distinct(self, handler):
+        self._setup(handler)
+        ids = [f"key_{next(handler._correlation_seq)}" for _ in range(5)]
+        assert len(set(ids)) == 5
+
+
+class TestScopeHintHookOrdering:
+    """Allowlist-drop vs normal-path invocation of _maybe_scope_hint."""
+
+    def _setup(self, handler):
+        handler.logger = Mock()
+        handler.bot.meshcore = Mock()
+        handler.bot.meshcore.contacts = {}
+        handler.bot.channel_manager = Mock()
+        handler.bot.channel_manager.get_channel_name = Mock(return_value="general")
+        handler.bot.translator = None
+        handler.bot.mesh_graph = None
+        handler.bot.connection_time = None
+        handler.recent_rf_data = []
+        handler.enhanced_correlation = False
+        handler.bot.command_manager.flood_scope_keys = {}
+        handler.bot.command_manager.flood_scope_allow_global = False
+
+    def _event(self, raw_hex=None):
+        payload = {
+            "channel_idx": 0,
+            "text": "ALICE: hello",
+            "path_len": 255,
+            "sender_timestamp": int(time.time()),
+        }
+        if raw_hex is not None:
+            payload["raw_hex"] = raw_hex
+        event = Mock()
+        event.payload = payload
+        return event
+
+    async def _run(self, handler, event):
+        calls = []
+
+        async def fake_process(msg):
+            calls.append("process_message")
+
+        async def fake_hint(msg):
+            calls.append("scope_hint")
+
+        with patch.object(handler, "process_message", side_effect=fake_process):
+            with patch.object(handler, "_maybe_scope_hint", side_effect=fake_hint):
+                with patch.object(handler, "_debug_decode_message_path", new_callable=AsyncMock):
+                    with patch.object(handler, "_debug_decode_packet_for_message", new_callable=AsyncMock):
+                        await handler.handle_channel_message(event)
+        return calls
+
+    async def test_normal_path_processes_then_hints(self, handler):
+        self._setup(handler)
+        calls = await self._run(handler, self._event())
+        assert calls == ["process_message", "scope_hint"]
+
+    async def test_allowlist_drop_hints_then_returns(self, handler):
+        self._setup(handler)
+        # Named-only allowlist, unscoped message (no rf data -> rt None,
+        # reply_scope None): dropped for everything except the hint
+        handler.bot.command_manager.flood_scope_keys = {"#pl-podlasie": b"k" * 16}
+        calls = await self._run(handler, self._event())
+        assert calls == ["scope_hint"]  # no process_message
+
+    async def test_old_cached_message_no_hint_no_process(self, handler):
+        self._setup(handler)
+        handler.bot.connection_time = time.time()
+        event = self._event()
+        event.payload["sender_timestamp"] = int(time.time() - 3600)
+        calls = await self._run(handler, event)
+        assert calls == []

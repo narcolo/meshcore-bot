@@ -1277,6 +1277,11 @@
     "cmd": {
       "description": "List available commands"
     },
+    "scope_hint": {
+      "description": "Warns senders on the configured channel using unscoped FLOOD to switch to scoped routing",
+      "hint": "Hi @[{name}], enable scope {scope} (TC_FLOOD) - unscoped msgs will be refused.",
+      "hint_short": "Please enable scope {scope} (TC_FLOOD) - unscoped msgs will be refused."
+    },
     "mention": {
       "description": "Responds in Bender style when bot name is called alone",
       "responses": [

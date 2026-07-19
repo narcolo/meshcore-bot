@@ -1187,6 +1187,42 @@ auto_backfill = false
 # Example: 0 = mark all users who have ever posted (all time)
 backfill_lookback_days = 30
 
+[Scope_Hint_Command]
+# Warn senders on the configured channel who transmit unscoped (plain) FLOOD to
+# switch to scoped TC_FLOOD routing. Text comes from the translation files.
+# Enabling this for the Public channel ALSO requires the override below in [Bot]:
+#   i_understand_that_running_the_bot_on_the_public_channel_is_potentially_disruptive_to_other_users_enjoyment_of_the_mesh_and_i_would_like_to_do_it_anyway = true
+enabled = false
+
+# Channel to watch (case-insensitive). Singular on purpose - do not add a
+# 'channels' key to this section (it would enable general command processing
+# on those channels via the BaseCommand channel-override mechanism).
+channel = Public
+
+# Hours before the same companion can be warned again. Must be >= 1.
+# Cooldown is persisted in the bot database and survives restarts
+# (best-effort; see docs/scope-hint-command.md for exact guarantees).
+cooldown_hours = 24
+
+# Named scope for the warning itself. Canonical lowercase; '#' added if missing.
+# Explicit global markers (*, 0, None) force a global response and require
+# allow_unscoped_response = true. Empty falls back to
+# [Channels] outgoing_flood_scope_override. Without any named scope the
+# command disables itself unless allow_unscoped_response is set.
+# Production deployment: #pl-podlasie
+response_scope = #pl-podlasie
+
+# Set true to explicitly accept sending the warning as unscoped global FLOOD
+# (e.g. so unscoped-only listeners are reachable during the transition).
+allow_unscoped_response = false
+
+# Interaction with [Channels] flood_scopes: scope_hint sees unscoped messages
+# even when a named-only flood_scopes allowlist is configured (it runs before
+# the allowlist drop). No '*' entry is needed; other commands remain blocked.
+# Typical pl-podlasie deployment sets BOTH:
+#   [Channels] flood_scopes = #pl-podlasie   (recognize/mirror incoming scope)
+#   [Scope_Hint_Command] response_scope = #pl-podlasie
+
 [Alert_Command]
 # Enable or disable the alert command (true/false)
 enabled = false
