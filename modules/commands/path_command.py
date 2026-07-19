@@ -1756,14 +1756,17 @@ class PathCommand(BaseCommand):
         """Send path response, splitting into multiple messages if necessary"""
         # Header: upstream's configurable path_reply_prefix when set (it can
         # express sender attribution via {sender} placeholders); otherwise the
-        # fork's default sender-name header. The optional phrase rides along in
-        # both cases. Everything lands in `prefix` so it appears only on the
-        # first split segment.
+        # fork's default @[sender] mention header, with the optional phrase
+        # folded into the header line. Everything lands in `prefix` so it
+        # appears only on the first split segment.
         prefix = self._format_path_reply_prefix(message)
         if not prefix:
             sender = message.sender_id or self.translate('common.unknown_sender')
-            prefix = sender + ":\n"
-        if phrase:
+            if phrase:
+                prefix = f"@[{sender}] {phrase}:\n"
+            else:
+                prefix = f"@[{sender}]:\n"
+        elif phrase:
             prefix += phrase + "\n"
 
         # Store the complete response for web viewer integration BEFORE splitting

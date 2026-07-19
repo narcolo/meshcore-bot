@@ -1062,6 +1062,7 @@
         "Long time no see",
         "Fancy meeting you here"
       ],
+      "night_keywords": ["good night", "goodnight", "gnight", "nite", "buenas noches", "bonne nuit"],
       "morning_greetings": [
         "Good morning",
         "Top o' the morning",
@@ -1278,6 +1279,11 @@
     "cmd": {
       "description": "List available commands"
     },
+    "routing_hint": {
+      "description": "Notifies Public-channel users transmitting with 1-byte routing to switch to 2-byte",
+      "hint_part1": "Hi @[{name}], your node uses 1-byte routing. Please switch to 2-byte.",
+      "hint_part2": "Main screen -> gear -> Experimental settings -> Default Path Hash Size -> 2-byte"
+    },
     "scope_hint": {
       "description": "Warns senders on the configured channel using unscoped FLOOD to switch to scoped routing",
       "hint": "Hi @[{name}], enable scope {scope} (TC_FLOOD) - unscoped msgs will be refused.",
@@ -1301,8 +1307,7 @@
         "I exist, apparently. What do you need?",
         "Oh, so NOW you need me. Typical.",
         "State your business before I change my mind."
-      ]
-    }
+      ]    }
   },
   "elapsed": {
     "sync_device_clock": "Sync Device Clock"

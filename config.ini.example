@@ -1262,6 +1262,17 @@ allow_unscoped_response = false
 #   [Channels] flood_scopes = pl-podlasie   (recognize/mirror incoming scope)
 #   [Scope_Hint_Command] response_scope = pl-podlasie
 
+[Routing_Hint_Command]
+# Notify Public-channel users who are transmitting with 1-byte routing to switch to 2-byte.
+# The bot sends two short messages; text comes from the active language translation file.
+enabled = false
+
+# Name of the channel to monitor (case-insensitive, must match the channel name on the device)
+channel = Public
+
+# Hours before the same user can be reminded again (avoids spam, resets on bot restart)
+cooldown_hours = 24
+
 [Alert_Command]
 # Enable or disable the alert command (true/false)
 enabled = false
