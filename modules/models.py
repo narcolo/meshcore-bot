@@ -27,7 +27,8 @@ class MeshMessage:
     elapsed: Optional[str] = None
     # When set from RF routing: path_nodes, path_hex, bytes_per_hop, path_length, route_type, etc.
     routing_info: Optional[dict[str, Any]] = None
-    # Matched flood scope for the reply (e.g. "#west"), None means global flood
+    # Matched flood scope for the reply in hash-less display form
+    # (e.g. "pl-podlasie"), None means global flood
     reply_scope: Optional[str] = None
     # True when this channel message arrived as scoped TC_FLOOD, False when it
     # arrived as plain unscoped FLOOD, None when unknown: RF correlation failed,

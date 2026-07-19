@@ -137,7 +137,12 @@ class CommandManager:
             if normalized in ("", "*", "0", "None"):
                 self.flood_scope_allow_global = True
             elif normalized:
-                scope_keys[normalized] = sha256(normalized.encode()).digest()[:16]
+                # Key derivation uses the '#'-prefixed canonical form: the
+                # firmware (RegionMap.cpp, implicit auto hashtag region) and
+                # meshcore-py's set_flood_scope both hash "#" + name when the
+                # configured name has no '#'. The dict key stays hash-less —
+                # it is the display form used for reply_scope and logs.
+                scope_keys[normalized] = sha256(("#" + normalized).encode()).digest()[:16]
         if scope_keys or self.flood_scope_allow_global:
             self.logger.info(
                 f"Flood scope allowlist active: {list(scope_keys.keys())} "
@@ -147,12 +152,21 @@ class CommandManager:
 
     @staticmethod
     def _normalize_scope_name(scope: str) -> str:
-        """Return scope with '#' prepended if it is a non-global named region without one."""
+        """Return the scope's canonical hash-less display form (e.g. "pl-podlasie").
+
+        Scope names are configured, displayed, and logged WITHOUT a leading
+        '#'; one entered in config is accepted and stripped. This is safe
+        because "name" and "#name" are the same region: the firmware
+        (RegionMap.cpp getTransportKeysFor, "implicit auto hashtag region")
+        and meshcore-py's set_flood_scope both prepend '#' before SHA256 key
+        derivation when it is absent. The '#'-prefixed form therefore exists
+        only at key-derivation points (see _load_flood_scope_keys), never in
+        names shown to users or stored in config/reply_scope.
+        Global markers ("", "*", "0", "None") pass through unchanged.
+        """
         if scope in ("", "*", "0", "None"):
             return scope
-        if not scope.startswith("#"):
-            return "#" + scope
-        return scope
+        return scope.strip().lstrip("#").strip()
 
     def _should_queue_command(self, command: BaseCommand, message: MeshMessage) -> tuple[bool, float]:
         """Check if command should be queued instead of rejected.
@@ -1132,7 +1146,10 @@ class CommandManager:
                 self.logger.debug(f"Error recording transmission for repeat tracking: {e}")
                 # Don't fail the send if transmission tracking fails
 
-            # Optional flood scope (region): set before send, restore after
+            # Optional flood scope (region): set before send, restore after.
+            # scope_to_use is the hash-less display form (e.g. "pl-podlasie");
+            # meshcore-py's set_flood_scope prepends '#' before deriving the
+            # transport key, matching the firmware's implicit-hashtag scheme.
             scope_cfg = ""
             if self.bot.config.has_section("Channels") and self.bot.config.has_option("Channels", "outgoing_flood_scope_override"):
                 scope_cfg = (self.bot.config.get("Channels", "outgoing_flood_scope_override") or "").strip()

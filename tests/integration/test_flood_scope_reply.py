@@ -102,6 +102,9 @@ class TestFloodScopeKeysLoading:
         return bot
 
     def test_scope_keys_loaded_for_hash_names(self):
+        # '#'-spelled config entries are normalized to the hash-less display
+        # name; the key bytes still derive from the canonical "#name" form
+        # (firmware/meshcore-py hashing convention).
         bot = MagicMock()
         bot.logger = Mock()
         bot.config = make_config(flood_scopes="#west, #east")
@@ -111,11 +114,15 @@ class TestFloodScopeKeysLoading:
         cm.logger = Mock()
         cm.flood_scope_allow_global = False
         result = cm._load_flood_scope_keys()
-        assert "#west" in result
-        assert "#east" in result
-        assert result["#west"] == _scope_key("#west")
+        assert "west" in result
+        assert "east" in result
+        assert "#west" not in result
+        assert result["west"] == _scope_key("#west")
 
-    def test_bare_names_normalized_on_load(self):
+    def test_bare_names_keep_hashless_display_form(self):
+        # Bare names stay hash-less as dict keys (display form) while the key
+        # bytes hash the '#'-prefixed canonical string — both spellings of a
+        # scope therefore produce identical keys under one display name.
         bot = MagicMock()
         bot.logger = Mock()
         bot.config = make_config(flood_scopes="west, east")
@@ -124,9 +131,10 @@ class TestFloodScopeKeysLoading:
         cm.logger = Mock()
         cm.flood_scope_allow_global = False
         result = cm._load_flood_scope_keys()
-        assert "#west" in result
-        assert "#east" in result
-        assert "west" not in result
+        assert "west" in result
+        assert "east" in result
+        assert "#west" not in result
+        assert result["west"] == _scope_key("#west")
 
     def test_empty_flood_scopes_returns_empty_dict(self):
         bot = MagicMock()
@@ -149,7 +157,7 @@ class TestFloodScopeKeysLoading:
         cm.flood_scope_allow_global = False
         result = cm._load_flood_scope_keys()
         assert "*" not in result
-        assert "#west" in result
+        assert "west" in result
 
     def test_star_sets_allow_global(self):
         bot = MagicMock()
@@ -292,8 +300,8 @@ async def test_send_response_passes_none_scope_when_unset():
 # ── scope normalization in send_channel_message ───────────────────────────────
 
 @pytest.mark.asyncio
-async def test_send_channel_message_normalizes_bare_scope():
-    """scope='west' passed in is normalized to '#west' before set_flood_scope call."""
+async def test_send_channel_message_strips_hash_from_scope():
+    """scope='#west' passed in is normalized to hash-less 'west' before set_flood_scope."""
     bot = MagicMock()
     bot.logger = Mock()
     bot.config = make_config()
@@ -318,9 +326,12 @@ async def test_send_channel_message_normalizes_bare_scope():
     cm._is_no_event_received = Mock(return_value=False)
     cm._handle_send_result = Mock(return_value=True)
 
-    await cm.send_channel_message("general", "hi", scope="west")
+    await cm.send_channel_message("general", "hi", scope="#west")
 
-    # set_flood_scope should have been called with "#west", not "west"
+    # set_flood_scope receives the hash-less display form; meshcore-py itself
+    # prepends '#' before deriving the transport key (messaging.py), matching
+    # the firmware's implicit-hashtag scheme.
     calls = set_flood_scope.await_args_list
     scope_set = [c.args[0] for c in calls if c.args]
-    assert "#west" in scope_set
+    assert "west" in scope_set
+    assert "#west" not in scope_set

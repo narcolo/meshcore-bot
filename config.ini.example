@@ -246,16 +246,19 @@ prefix_bytes = 1
 
 # List of region scopes (comma-separated) that the bot will reply to when messages arrive on those scopes.
 # Responses will be sent with the same scope hash.
-# Example: flood_scopes = *,#west,#east
+# Example: flood_scopes = *,pl-podlasie
 # Use * to allow replies to unscoped FLOOD messages.
 # Leave blank or commented to use the default (all).
-# flood_scopes = #region, #otherregion
+# Scope names are written WITHOUT a leading '#' (a '#' is accepted and
+# stripped): "name" and "#name" are the same region — the firmware and the
+# meshcore library prepend '#' internally, only when deriving the scope key.
+# flood_scopes = region, otherregion
 
 # Outgoing flood scope override (optional)
-# Set this to a region (e.g. #west) to always use that scope for all outgoing channel messages.
+# Set this to a region (e.g. pl-podlasie) to always use that scope for all outgoing channel messages.
 # Leave commented or empty to let the bot automatically match the incoming message’s region.
-# You can use "region" or "#region" (the # is added if missing).
-# outgoing_flood_scope_override = #west
+# Hash-less name, same convention as flood_scopes above.
+# outgoing_flood_scope_override = pl-podlasie
 
 [Banned_Users]
 # List of banned sender names (comma-separated). Matching is prefix (starts-with):
@@ -1204,13 +1207,16 @@ channel = Public
 # (best-effort; see docs/scope-hint-command.md for exact guarantees).
 cooldown_hours = 24
 
-# Named scope for the warning itself. Canonical lowercase; '#' added if missing.
+# Named scope for the warning itself, in hash-less form ("pl-podlasie" — a
+# leading '#' is accepted and stripped; the '#'-prefixed form is used only
+# internally for key derivation, matching the firmware). This name is also
+# what the hint text shows mesh users to type into their app.
 # Explicit global markers (*, 0, None) force a global response and require
 # allow_unscoped_response = true. Empty falls back to
 # [Channels] outgoing_flood_scope_override. Without any named scope the
 # command disables itself unless allow_unscoped_response is set.
-# Production deployment: #pl-podlasie
-response_scope = #pl-podlasie
+# Production deployment: pl-podlasie
+response_scope = pl-podlasie
 
 # Set true to explicitly accept sending the warning as unscoped global FLOOD
 # (e.g. so unscoped-only listeners are reachable during the transition).
@@ -1220,8 +1226,8 @@ allow_unscoped_response = false
 # even when a named-only flood_scopes allowlist is configured (it runs before
 # the allowlist drop). No '*' entry is needed; other commands remain blocked.
 # Typical pl-podlasie deployment sets BOTH:
-#   [Channels] flood_scopes = #pl-podlasie   (recognize/mirror incoming scope)
-#   [Scope_Hint_Command] response_scope = #pl-podlasie
+#   [Channels] flood_scopes = pl-podlasie   (recognize/mirror incoming scope)
+#   [Scope_Hint_Command] response_scope = pl-podlasie
 
 [Alert_Command]
 # Enable or disable the alert command (true/false)

@@ -2421,7 +2421,7 @@ class TestScopeHintHookOrdering:
         self._setup(handler)
         # Named-only allowlist, unscoped message (no rf data -> rt None,
         # reply_scope None): dropped for everything except the hint
-        handler.bot.command_manager.flood_scope_keys = {"#pl-podlasie": b"k" * 16}
+        handler.bot.command_manager.flood_scope_keys = {"pl-podlasie": b"k" * 16}
         calls = await self._run(handler, self._event())
         assert calls == ["scope_hint"]  # no process_message
 

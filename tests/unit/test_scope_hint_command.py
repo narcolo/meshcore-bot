@@ -56,7 +56,7 @@ def _make_bot(
     bot_name: str = "TestBot",
     channel: str = "general",
     cooldown_hours: str = "24",
-    response_scope: str = "#pl-podlasie",
+    response_scope: str = "pl-podlasie",
     allow_unscoped_response: str = "false",
     outgoing_override: str = "",
     public_override: bool = False,
@@ -274,13 +274,16 @@ class TestCooldownIdentity:
 # ---------------------------------------------------------------------------
 
 class TestEffectiveResponseScope:
-    def test_named_scope_used_and_normalized(self):
+    def test_named_scope_kept_hashless(self):
+        # Hash-less display form is canonical throughout the bot
         cmd = _make_command(response_scope="pl-podlasie")
-        assert cmd.effective_response_scope == "#pl-podlasie"
+        assert cmd.effective_response_scope == "pl-podlasie"
 
-    def test_named_scope_with_hash_kept(self):
+    def test_hash_spelling_normalized_to_hashless(self):
+        # "#name" and "name" are the same region (firmware/meshcore-py prepend
+        # '#' only at key derivation); config accepts both, display drops '#'
         cmd = _make_command(response_scope="#pl-podlasie")
-        assert cmd.effective_response_scope == "#pl-podlasie"
+        assert cmd.effective_response_scope == "pl-podlasie"
 
     @pytest.mark.parametrize("marker", ["*", "0", "None"])
     def test_explicit_global_beats_named_override_and_disables(self, marker):
@@ -290,7 +293,7 @@ class TestEffectiveResponseScope:
 
     def test_empty_scope_falls_back_to_outgoing_override(self):
         cmd = _make_command(response_scope="", outgoing_override="#west")
-        assert cmd.effective_response_scope == "#west"
+        assert cmd.effective_response_scope == "west"  # normalized hash-less
         assert cmd.enabled is True
 
     def test_empty_scope_and_global_override_disables(self):
@@ -344,7 +347,7 @@ class TestExecute:
         send.assert_awaited_once()
         sent_content = send.await_args.args[1]
         assert "Alice" in sent_content
-        assert "#pl-podlasie" in sent_content
+        assert "pl-podlasie" in sent_content
         # rate-limit contract: per-user admission bypassed, per-user accounting off
         assert send.await_args.kwargs["skip_per_user_rate_limit"] is True
         assert send.await_args.kwargs["record_user_rate_limit"] is False
@@ -371,13 +374,13 @@ class TestExecute:
         cmd.bot.db_manager.set_metadata.assert_not_called()
 
     async def test_original_message_not_mutated(self):
-        cmd = _make_command(response_scope="#pl-podlasie")
+        cmd = _make_command(response_scope="pl-podlasie")
         msg = _msg(sender_id="Alice")
         assert msg.reply_scope is None
         await cmd.execute(msg)
         assert msg.reply_scope is None  # copy carries the scope, not the original
         hint_message = cmd.bot.command_manager.send_response.await_args.args[0]
-        assert hint_message.reply_scope == "#pl-podlasie"
+        assert hint_message.reply_scope == "pl-podlasie"
         assert hint_message is not msg
 
     async def test_unscoped_response_leaves_reply_scope(self):
@@ -450,7 +453,7 @@ class TestPayloadBudget:
         assert len(LONG_BOT_31.encode("utf-8")) == 31
         cmd = _make_command(bot_name=LONG_BOT_31, lang=lang)
         msg = _msg(sender_id=LONG_NAME_31)
-        hint_message = dataclasses.replace(msg, reply_scope="#pl-podlasie")
+        hint_message = dataclasses.replace(msg, reply_scope="pl-podlasie")
         hint = cmd._build_hint(msg, hint_message)
         assert hint is not None
         assert LONG_NAME_31 in hint  # full hint used, no fallback needed
@@ -462,7 +465,7 @@ class TestPayloadBudget:
         cmd = _make_command(bot_name=LONG_BOT_31, lang=lang)
         huge_name = "Ą" * 60  # 120 bytes: hint cannot fit
         msg = _msg(sender_id=huge_name)
-        hint_message = dataclasses.replace(msg, reply_scope="#pl-podlasie")
+        hint_message = dataclasses.replace(msg, reply_scope="pl-podlasie")
         hint = cmd._build_hint(msg, hint_message)
         assert hint is not None
         assert huge_name not in hint  # nameless short form, no broken mention
@@ -488,7 +491,7 @@ class TestPayloadBudget:
         # 31-byte bot name: helper floor gives 130-10=120, physics 117
         cmd = _make_command(bot_name=LONG_BOT_31)
         msg = _msg(sender_id="Alice")
-        hint_message = dataclasses.replace(msg, reply_scope="#pl-podlasie")
+        hint_message = dataclasses.replace(msg, reply_scope="pl-podlasie")
         assert cmd._payload_budget(hint_message) == 160 - 31 - 2 - 10
 
     def test_budget_without_scope_skips_regional_overhead(self):
