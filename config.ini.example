@@ -2207,6 +2207,53 @@ maxlongitude = -114.0
 # When true: notification message then link-only message. When false: no link sent.
 # Default: true
 send_link = true
+[Alerts_Service]
+# Background push service (Phase 2a) -- automatically polls official Bialystok/Podlaskie
+# alert sources and pushes new alerts to a MeshCore channel with no user interaction.
+# See plans/alert-feeds-research.md and plans/phase2-alert-integration-plan.md for the
+# source research and design behind this service. GIOS air quality and PAA radiation
+# monitoring are Phase 2b and are not implemented by this section yet.
+enabled = false
+
+# Channel to post alerts to
+channel = general
+
+# Optional regional TC_FLOOD scope for mesh channel posts from this service
+# (e.g. pl-podlasie). Empty = use [Channels] outgoing_flood_scope_override.
+flood_scope =
+
+# --- IMGW meteorological warnings ---
+# Filtered to warnings whose teryt[] intersects Bialystok (2061) or powiat bialostocki
+# (2002) -- see plans/alert-feeds-research.md for how this filtering was verified.
+imgw_meteo_enabled = true
+
+# Poll interval (seconds). Default: 300 (5 minutes)
+imgw_meteo_poll_interval = 300
+
+# Also send the full warning text as a second, follow-up message after the compact
+# alert. Default: false (one compact message per alert)
+imgw_meteo_send_details = false
+
+# Ceiling on IMGW alerts sent per rolling hour; extra matches are logged and
+# suppressed rather than sent, so a burst of many simultaneously-active warnings
+# can't flood the channel
+imgw_meteo_max_alerts_per_hour = 12
+
+# --- RSO (Regionalny System Ostrzegania), wojewodztwo podlaskie ---
+# Also carries republished Alert RCB messages -- there is no standalone live RCB
+# feed (see research doc), so this is the practical integration point for those too.
+rso_enabled = true
+
+# Poll interval (seconds). Default: 300 (5 minutes)
+rso_poll_interval = 300
+
+# Also send the full alert text as a second, follow-up message after the compact
+# alert. Default: false (one compact message per alert)
+rso_send_details = false
+
+# Ceiling on RSO alerts sent per rolling hour; extra matches are logged and
+# suppressed rather than sent
+rso_max_alerts_per_hour = 12
 [Worldcup_Service]
 # Live FIFA World Cup score updates posted to a channel (true/false).
 # Posts proactive messages as matches progress, e.g.:
