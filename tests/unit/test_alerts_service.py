@@ -8,6 +8,7 @@ mocked at the call site.
 
 import configparser
 import json
+from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, Mock
 
 import pytest
@@ -86,7 +87,7 @@ class TestDedup:
         service = AlertsService(bot)
         await service._process_new_alerts(
             "imgw_meteo", [IMGW_RECORD], service._format_imgw_message,
-            send_details=False, max_alerts_per_hour=12,
+            send_details=False, max_alerts_per_hour=12, max_age_hours=24,
         )
         bot.command_manager.send_channel_message.assert_awaited_once()
 
@@ -96,7 +97,7 @@ class TestDedup:
         for _ in range(2):
             await service._process_new_alerts(
                 "imgw_meteo", [IMGW_RECORD], service._format_imgw_message,
-                send_details=False, max_alerts_per_hour=12,
+                send_details=False, max_alerts_per_hour=12, max_age_hours=24,
             )
         bot.command_manager.send_channel_message.assert_awaited_once()
 
@@ -105,7 +106,7 @@ class TestDedup:
         service = AlertsService(bot)
         await service._process_new_alerts(
             "imgw_meteo", [], service._format_imgw_message,
-            send_details=False, max_alerts_per_hour=12,
+            send_details=False, max_alerts_per_hour=12, max_age_hours=24,
         )
         bot.command_manager.send_channel_message.assert_not_awaited()
 
@@ -121,7 +122,7 @@ class TestDedup:
 
         await service._process_new_alerts(
             "imgw_meteo", [IMGW_RECORD], service._format_imgw_message,
-            send_details=False, max_alerts_per_hour=12,
+            send_details=False, max_alerts_per_hour=12, max_age_hours=24,
         )
         bot.command_manager.send_channel_message.assert_not_awaited()
 
@@ -131,7 +132,7 @@ class TestDedup:
         service = AlertsService(bot)
         await service._process_new_alerts(
             "rso", [RSO_RECORD], service._format_rso_message,
-            send_details=False, max_alerts_per_hour=12,
+            send_details=False, max_alerts_per_hour=12, max_age_hours=24,
         )
         persisted = json.loads(db_manager.get_metadata(METADATA_KEY_RSO_SEEN))
         assert RSO_RECORD["external_id"] in persisted
@@ -145,7 +146,7 @@ class TestRateLimit:
         record_2 = dict(IMGW_RECORD, external_id="Wr_second", published_at="2026-08-10 07:00:00")
         await service._process_new_alerts(
             "imgw_meteo", [IMGW_RECORD, record_2], service._format_imgw_message,
-            send_details=False, max_alerts_per_hour=1,
+            send_details=False, max_alerts_per_hour=1, max_age_hours=24,
         )
         assert bot.command_manager.send_channel_message.await_count == 1
 
@@ -156,12 +157,12 @@ class TestRateLimit:
         record_2 = dict(IMGW_RECORD, external_id="Wr_second", published_at="2026-08-10 07:00:00")
         await service._process_new_alerts(
             "imgw_meteo", [IMGW_RECORD, record_2], service._format_imgw_message,
-            send_details=False, max_alerts_per_hour=1,
+            send_details=False, max_alerts_per_hour=1, max_age_hours=24,
         )
         bot.command_manager.send_channel_message.reset_mock()
         await service._process_new_alerts(
             "imgw_meteo", [IMGW_RECORD, record_2], service._format_imgw_message,
-            send_details=False, max_alerts_per_hour=1,
+            send_details=False, max_alerts_per_hour=1, max_age_hours=24,
         )
         bot.command_manager.send_channel_message.assert_not_awaited()
 
@@ -180,7 +181,7 @@ class TestSendFailureNotLost:
         service = AlertsService(bot)
         await service._process_new_alerts(
             "imgw_meteo", [IMGW_RECORD], service._format_imgw_message,
-            send_details=False, max_alerts_per_hour=12,
+            send_details=False, max_alerts_per_hour=12, max_age_hours=24,
         )
         assert IMGW_RECORD["external_id"] not in service._seen_ids["imgw_meteo"]
 
@@ -193,11 +194,11 @@ class TestSendFailureNotLost:
 
         await service._process_new_alerts(
             "imgw_meteo", [IMGW_RECORD], service._format_imgw_message,
-            send_details=False, max_alerts_per_hour=12,
+            send_details=False, max_alerts_per_hour=12, max_age_hours=24,
         )
         await service._process_new_alerts(
             "imgw_meteo", [IMGW_RECORD], service._format_imgw_message,
-            send_details=False, max_alerts_per_hour=12,
+            send_details=False, max_alerts_per_hour=12, max_age_hours=24,
         )
         assert bot.command_manager.send_channel_message.await_count == 2
         assert IMGW_RECORD["external_id"] in service._seen_ids["imgw_meteo"]
@@ -208,7 +209,7 @@ class TestSendFailureNotLost:
         service = AlertsService(bot)
         await service._process_new_alerts(
             "imgw_meteo", [IMGW_RECORD], service._format_imgw_message,
-            send_details=True, max_alerts_per_hour=12,
+            send_details=True, max_alerts_per_hour=12, max_age_hours=24,
         )
         # Only the one (failed) primary-message attempt -- no follow-up detail send.
         assert bot.command_manager.send_channel_message.await_count == 1
@@ -238,7 +239,7 @@ class TestSendPacing:
         record_2 = dict(RSO_RECORD, external_id="second", published_at="2026-08-10 15:00:00")
         await service._process_new_alerts(
             "rso", [RSO_RECORD, record_2], service._format_rso_message,
-            send_details=False, max_alerts_per_hour=12,
+            send_details=False, max_alerts_per_hour=12, max_age_hours=24,
         )
         assert sleep_calls == [3.3]  # configured 3s + 0.3s margin, once (before 2nd send)
 
@@ -254,7 +255,7 @@ class TestSendPacing:
         )
         await service._process_new_alerts(
             "imgw_meteo", [IMGW_RECORD], service._format_imgw_message,
-            send_details=False, max_alerts_per_hour=12,
+            send_details=False, max_alerts_per_hour=12, max_age_hours=24,
         )
         bot.command_manager.send_channel_message.assert_awaited_once()
 
@@ -275,9 +276,81 @@ class TestSendPacing:
         record_2 = dict(IMGW_RECORD, external_id="second", published_at="2026-08-10 07:00:00")
         await service._process_new_alerts(
             "imgw_meteo", [IMGW_RECORD, record_2], service._format_imgw_message,
-            send_details=False, max_alerts_per_hour=1,  # only 1 allowed -> 2nd is capped, not sent
+            send_details=False, max_alerts_per_hour=1, max_age_hours=24,  # only 1 allowed -> 2nd is capped, not sent
         )
         assert sleep_calls == []
+
+
+@pytest.mark.unit
+class TestStaleness:
+    """Regression coverage: clearing persisted seen-ids (e.g. after the send-loss
+    bug above) must not resurrect week-old news -- only alerts published within
+    max_age_hours should ever be sent, dedup-reset or not."""
+
+    def _timestamp(self, hours_ago: float) -> str:
+        return (datetime.now() - timedelta(hours=hours_ago)).strftime("%Y-%m-%d %H:%M:%S")
+
+    def test_is_stale_true_for_old_timestamp(self):
+        bot = _alerts_service_bot()
+        service = AlertsService(bot)
+        record = dict(IMGW_RECORD, published_at=self._timestamp(hours_ago=240))  # 10 days
+        assert service._is_stale(record, max_age_hours=24) is True
+
+    def test_is_stale_false_for_recent_timestamp(self):
+        bot = _alerts_service_bot()
+        service = AlertsService(bot)
+        record = dict(IMGW_RECORD, published_at=self._timestamp(hours_ago=1))
+        assert service._is_stale(record, max_age_hours=24) is False
+
+    def test_is_stale_fails_open_when_no_timestamp(self):
+        """No published_at or valid_from at all -- don't suppress on a guess."""
+        bot = _alerts_service_bot()
+        service = AlertsService(bot)
+        record = dict(IMGW_RECORD, published_at=None, valid_from=None)
+        assert service._is_stale(record, max_age_hours=24) is False
+
+    def test_is_stale_falls_back_to_valid_from(self):
+        bot = _alerts_service_bot()
+        service = AlertsService(bot)
+        record = dict(IMGW_RECORD, published_at=None, valid_from=self._timestamp(hours_ago=240))
+        assert service._is_stale(record, max_age_hours=24) is True
+
+    async def test_stale_alert_is_not_sent(self):
+        bot = _alerts_service_bot()
+        service = AlertsService(bot)
+        old_record = dict(IMGW_RECORD, published_at=self._timestamp(hours_ago=240))
+        await service._process_new_alerts(
+            "imgw_meteo", [old_record], service._format_imgw_message,
+            send_details=False, max_alerts_per_hour=12, max_age_hours=24,
+        )
+        bot.command_manager.send_channel_message.assert_not_awaited()
+
+    async def test_stale_alert_is_marked_seen_so_its_not_rechecked_forever(self):
+        bot = _alerts_service_bot()
+        service = AlertsService(bot)
+        old_record = dict(IMGW_RECORD, published_at=self._timestamp(hours_ago=240))
+        await service._process_new_alerts(
+            "imgw_meteo", [old_record], service._format_imgw_message,
+            send_details=False, max_alerts_per_hour=12, max_age_hours=24,
+        )
+        assert old_record["external_id"] in service._seen_ids["imgw_meteo"]
+
+    async def test_fresh_alert_still_sent_alongside_a_stale_one(self):
+        bot = _alerts_service_bot()
+        service = AlertsService(bot)
+        old_record = dict(
+            IMGW_RECORD, external_id="old", published_at=self._timestamp(hours_ago=240)
+        )
+        fresh_record = dict(
+            IMGW_RECORD, external_id="fresh", published_at=self._timestamp(hours_ago=1)
+        )
+        await service._process_new_alerts(
+            "imgw_meteo", [old_record, fresh_record], service._format_imgw_message,
+            send_details=False, max_alerts_per_hour=12, max_age_hours=24,
+        )
+        bot.command_manager.send_channel_message.assert_awaited_once()
+        assert "old" in service._seen_ids["imgw_meteo"]
+        assert "fresh" in service._seen_ids["imgw_meteo"]
 
 
 @pytest.mark.unit
@@ -287,7 +360,7 @@ class TestFloodScope:
         service = AlertsService(bot)
         await service._process_new_alerts(
             "imgw_meteo", [IMGW_RECORD], service._format_imgw_message,
-            send_details=False, max_alerts_per_hour=12,
+            send_details=False, max_alerts_per_hour=12, max_age_hours=24,
         )
         _, kwargs = bot.command_manager.send_channel_message.call_args
         assert kwargs["scope"] == "pl-podlasie"
@@ -297,7 +370,7 @@ class TestFloodScope:
         service = AlertsService(bot)
         await service._process_new_alerts(
             "imgw_meteo", [IMGW_RECORD], service._format_imgw_message,
-            send_details=False, max_alerts_per_hour=12,
+            send_details=False, max_alerts_per_hour=12, max_age_hours=24,
         )
         _, kwargs = bot.command_manager.send_channel_message.call_args
         assert kwargs["scope"] is None
@@ -310,7 +383,7 @@ class TestSendDetails:
         service = AlertsService(bot)
         await service._process_new_alerts(
             "imgw_meteo", [IMGW_RECORD], service._format_imgw_message,
-            send_details=False, max_alerts_per_hour=12,
+            send_details=False, max_alerts_per_hour=12, max_age_hours=24,
         )
         assert bot.command_manager.send_channel_message.await_count == 1
 
@@ -319,7 +392,7 @@ class TestSendDetails:
         service = AlertsService(bot)
         await service._process_new_alerts(
             "imgw_meteo", [IMGW_RECORD], service._format_imgw_message,
-            send_details=True, max_alerts_per_hour=12,
+            send_details=True, max_alerts_per_hour=12, max_age_hours=24,
         )
         assert bot.command_manager.send_channel_message.await_count == 2
         second_call_text = bot.command_manager.send_channel_message.call_args_list[1].args[1]
@@ -336,6 +409,7 @@ class TestMessageFormatting:
         assert "Burze" in text
         assert "st.1" in text
         assert "03:00 11.08" in text
+        assert "[10.08]" in text  # published_at date, distinct from the valid_to time
 
     def test_rso_message_is_compact_and_contains_title(self):
         bot = _alerts_service_bot()
@@ -343,6 +417,14 @@ class TestMessageFormatting:
         text = service._format_rso_message(RSO_RECORD)
         assert len(text) <= 140
         assert "ALERT RCB - BURZE/2" in text
+        assert "[10.08]" in text  # published_at date
+
+    def test_date_omitted_when_published_at_missing(self):
+        bot = _alerts_service_bot()
+        service = AlertsService(bot)
+        record = dict(IMGW_RECORD, published_at=None)
+        text = service._format_imgw_message(record)
+        assert "[" not in text
 
     def test_long_description_does_not_blow_budget(self):
         bot = _alerts_service_bot()

@@ -2239,6 +2239,12 @@ imgw_meteo_send_details = false
 # can't flood the channel
 imgw_meteo_max_alerts_per_hour = 12
 
+# Skip warnings published longer ago than this many hours. Safety net against
+# resurrecting old news -- e.g. after a dedup-state reset, or on a first-ever
+# start against a feed that lists everything currently active, not just what
+# was recently published.
+imgw_meteo_max_age_hours = 24
+
 # --- RSO (Regionalny System Ostrzegania), wojewodztwo podlaskie ---
 # Also carries republished Alert RCB messages -- there is no standalone live RCB
 # feed (see research doc), so this is the practical integration point for those too.
@@ -2254,6 +2260,10 @@ rso_send_details = false
 # Ceiling on RSO alerts sent per rolling hour; extra matches are logged and
 # suppressed rather than sent
 rso_max_alerts_per_hour = 12
+
+# Skip alerts published longer ago than this many hours (same stale-dedup-reset
+# guard as imgw_meteo_max_age_hours above)
+rso_max_age_hours = 24
 [Worldcup_Service]
 # Live FIFA World Cup score updates posted to a channel (true/false).
 # Posts proactive messages as matches progress, e.g.:

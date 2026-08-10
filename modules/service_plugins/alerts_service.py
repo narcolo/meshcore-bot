@@ -67,6 +67,9 @@ class AlertsService(BaseServicePlugin):
          "help": "Also send the full warning text as a follow-up message."},
         {"key": "imgw_meteo_max_alerts_per_hour", "label": "IMGW alerts/hour cap", "type": "int",
          "min": 1, "default": 12, "help": "Ceiling on IMGW alerts sent per rolling hour."},
+        {"key": "imgw_meteo_max_age_hours", "label": "IMGW max alert age", "type": "int",
+         "min": 1, "default": 24, "unit": "h",
+         "help": "Skip warnings published longer ago than this (stale-dedup-reset guard)."},
         {"key": "rso_enabled", "label": "RSO enabled", "type": "bool", "default": True,
          "help": "Poll RSO (Regionalny System Ostrzegania) for wojewodztwo podlaskie."},
         {"key": "rso_poll_interval", "label": "RSO poll interval", "type": "int",
@@ -75,6 +78,9 @@ class AlertsService(BaseServicePlugin):
          "help": "Also send the full alert text as a follow-up message."},
         {"key": "rso_max_alerts_per_hour", "label": "RSO alerts/hour cap", "type": "int",
          "min": 1, "default": 12, "help": "Ceiling on RSO alerts sent per rolling hour."},
+        {"key": "rso_max_age_hours", "label": "RSO max alert age", "type": "int",
+         "min": 1, "default": 24, "unit": "h",
+         "help": "Skip alerts published longer ago than this (stale-dedup-reset guard)."},
     ]
 
     def __init__(self, bot: Any) -> None:
@@ -89,12 +95,18 @@ class AlertsService(BaseServicePlugin):
         self.imgw_max_alerts_per_hour = self.bot.config.getint(
             section, "imgw_meteo_max_alerts_per_hour", fallback=12
         )
+        self.imgw_max_age_hours = self.bot.config.getint(
+            section, "imgw_meteo_max_age_hours", fallback=24
+        )
 
         self.rso_enabled = self.bot.config.getboolean(section, "rso_enabled", fallback=True)
         self.rso_poll_interval = self.bot.config.getint(section, "rso_poll_interval", fallback=300)
         self.rso_send_details = self.bot.config.getboolean(section, "rso_send_details", fallback=False)
         self.rso_max_alerts_per_hour = self.bot.config.getint(
             section, "rso_max_alerts_per_hour", fallback=12
+        )
+        self.rso_max_age_hours = self.bot.config.getint(
+            section, "rso_max_age_hours", fallback=24
         )
 
         self._tasks: list[asyncio.Task] = []
@@ -203,14 +215,18 @@ class AlertsService(BaseServicePlugin):
             formatter=self._format_imgw_message,
             send_details=self.imgw_send_details,
             max_alerts_per_hour=self.imgw_max_alerts_per_hour,
+            max_age_hours=self.imgw_max_age_hours,
         )
 
     def _format_imgw_message(self, record: dict[str, Any]) -> str:
         prefix = self._translate("services.alerts.imgw_meteo.prefix")
         title = record.get("title") or "?"
         severity = record.get("severity") or "?"
+        date = self._format_date_short(record.get("published_at"))
         valid_to = self._format_dt_short(record.get("valid_to"))
         text = f"⚠️ {prefix}: {title} (st.{severity})"
+        if date:
+            text = f"{text} [{date}]"
         if valid_to:
             until = self._translate("services.alerts.until", time=valid_to)
             text = f"{text} — {until}"
@@ -237,13 +253,18 @@ class AlertsService(BaseServicePlugin):
             formatter=self._format_rso_message,
             send_details=self.rso_send_details,
             max_alerts_per_hour=self.rso_max_alerts_per_hour,
+            max_age_hours=self.rso_max_age_hours,
         )
 
     def _format_rso_message(self, record: dict[str, Any]) -> str:
         prefix = self._translate("services.alerts.rso.prefix")
         title = record.get("title") or "?"
         description = record.get("description") or ""
-        base = f"📢 {prefix}: {title}"
+        date = self._format_date_short(record.get("published_at"))
+        base = f"📢 {prefix}"
+        if date:
+            base = f"{base} [{date}]"
+        base = f"{base}: {title}"
         if description and description != title:
             remaining = COMPACT_MESSAGE_MAX_LEN - len(base) - 3  # " — "
             if remaining > 10:
@@ -261,6 +282,7 @@ class AlertsService(BaseServicePlugin):
         formatter: Callable[[dict[str, Any]], str],
         send_details: bool,
         max_alerts_per_hour: int,
+        max_age_hours: float,
     ) -> None:
         seen = self._seen_ids[source]
         new_records = [
@@ -269,6 +291,25 @@ class AlertsService(BaseServicePlugin):
         ]
         if not new_records:
             return  # nothing new this poll -- send nothing (requirement: no-op on no new alerts)
+
+        # Drop anything published well before now -- e.g. a dedup-state reset (or a
+        # first-ever start against a feed that lists everything currently "active",
+        # not just recently-published) must not resurrect week-old news. Still marked
+        # seen so a stale item already in the feed isn't re-checked every poll forever.
+        fresh_records = []
+        stale_count = 0
+        for record in new_records:
+            if self._is_stale(record, max_age_hours):
+                self._mark_seen(source, record["external_id"])
+                stale_count += 1
+            else:
+                fresh_records.append(record)
+        if stale_count:
+            self.logger.info(
+                "%s: skipped %d stale alert(s) (published more than %gh ago)",
+                source, stale_count, max_age_hours,
+            )
+        new_records = fresh_records
 
         # Oldest first, so a burst of several new alerts posts in chronological order.
         new_records.sort(key=lambda r: r.get("published_at") or "")
@@ -425,3 +466,30 @@ class AlertsService(BaseServicePlugin):
             return dt.strftime("%H:%M %d.%m")
         except ValueError:
             return value
+
+    @staticmethod
+    def _format_date_short(value: Optional[str]) -> Optional[str]:
+        """'2026-08-10 19:00:00' -> '10.08'; returns None on missing/unparseable input."""
+        if not value:
+            return None
+        try:
+            return datetime.strptime(value, "%Y-%m-%d %H:%M:%S").strftime("%d.%m")
+        except ValueError:
+            return None
+
+    def _is_stale(self, record: dict[str, Any], max_age_hours: float) -> bool:
+        """True if the record's published date is older than max_age_hours.
+
+        Fails open (not stale) when no usable timestamp is present, so a record
+        missing/with an unparseable date is never silently suppressed -- staleness
+        is an extra safety filter, not the primary dedup mechanism.
+        """
+        timestamp = record.get("published_at") or record.get("valid_from")
+        if not timestamp:
+            return False
+        try:
+            published = datetime.strptime(timestamp, "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            return False
+        age_hours = (datetime.now() - published).total_seconds() / 3600
+        return age_hours > max_age_hours
