@@ -28,12 +28,14 @@ from typing import Any, Callable, Coroutine, Optional
 import requests
 
 from ..clients import alert_sources
-from ..utils import truncate_string
 from .base_service import BaseServicePlugin
 
-# Same conservative single-message budget CLAUDE.md documents for channel sends
-# (~148 chars after the bot's username prefix); alerts are compact by design.
-COMPACT_MESSAGE_MAX_LEN = 140
+# Per-chunk budget (UTF-8 bytes) for splitting a long alert into several messages
+# rather than truncating it -- same conservative ballpark CLAUDE.md documents for
+# channel sends (~148 chars after the bot's username prefix). Byte-based (not a
+# character count) since split_text_into_utf8_chunks is codepoint-safe and Polish
+# diacritics/emoji are multi-byte in UTF-8.
+MESSAGE_CHUNK_MAX_BYTES = 140
 
 # Per-source dedup state (bot_metadata, JSON-encoded list of external_ids, most
 # recent last) is capped at this many entries so it never grows unbounded — the
@@ -219,6 +221,10 @@ class AlertsService(BaseServicePlugin):
         )
 
     def _format_imgw_message(self, record: dict[str, Any]) -> str:
+        """Compact header only -- the full warning text (tresc) is sent separately
+        via send_details, since it's usually much longer than the header. Returned
+        untruncated; _send_alert chunks it if a very long title ever exceeds one
+        message rather than cutting it off."""
         prefix = self._translate("services.alerts.imgw_meteo.prefix")
         title = record.get("title") or "?"
         severity = record.get("severity") or "?"
@@ -230,7 +236,7 @@ class AlertsService(BaseServicePlugin):
         if valid_to:
             until = self._translate("services.alerts.until", time=valid_to)
             text = f"{text} — {until}"
-        return truncate_string(text, COMPACT_MESSAGE_MAX_LEN)
+        return text
 
     # ------------------------------------------------------------------
     # RSO
@@ -257,6 +263,10 @@ class AlertsService(BaseServicePlugin):
         )
 
     def _format_rso_message(self, record: dict[str, Any]) -> str:
+        """Header + the full description merged into one text -- unlike IMGW, RSO's
+        description is normally short enough to matter for the default message.
+        Returned untruncated; _send_alert splits it into multiple messages instead
+        of cutting it off when it doesn't fit in one."""
         prefix = self._translate("services.alerts.rso.prefix")
         title = record.get("title") or "?"
         description = record.get("description") or ""
@@ -266,10 +276,8 @@ class AlertsService(BaseServicePlugin):
             base = f"{base} [{date}]"
         base = f"{base}: {title}"
         if description and description != title:
-            remaining = COMPACT_MESSAGE_MAX_LEN - len(base) - 3  # " — "
-            if remaining > 10:
-                base = f"{base} — {truncate_string(description, remaining)}"
-        return truncate_string(base, COMPACT_MESSAGE_MAX_LEN)
+            base = f"{base} — {description}"
+        return base
 
     # ------------------------------------------------------------------
     # Shared: dedup, rate limiting, sending
@@ -317,7 +325,7 @@ class AlertsService(BaseServicePlugin):
         sent_count = 0
         suppressed_count = 0
         failed_count = 0
-        for i, record in enumerate(new_records):
+        for record in new_records:
             external_id = record["external_id"]
 
             if not self._check_rate_limit(source, max_alerts_per_hour):
@@ -327,14 +335,13 @@ class AlertsService(BaseServicePlugin):
                 suppressed_count += 1
                 continue
 
-            if i > 0:
-                # Pace sends to the bot's own global TX rate limit ([Bot]
-                # rate_limit_seconds) so a burst of several new alerts (e.g. a
-                # first-run backfill) doesn't collide with it -- send_channel_message
-                # returns False rather than queuing/retrying when rate limited, so
-                # without pacing everything past the first message would be dropped.
-                await asyncio.sleep(self._send_pace_seconds())
-
+            # No manual pacing needed here: _send_alert goes through
+            # send_channel_messages_chunked, which (a) skips the reject-on-limit
+            # global rate limiter for automated services -- the thing that silently
+            # dropped 10 of 11 alerts before this fix -- and (b) still blocks on the
+            # bot's shared TX pacer (bot_tx_rate_limiter) on every send, including
+            # across separate calls, so a burst is naturally spaced without any of
+            # it being lost.
             try:
                 sent = await self._send_alert(record, formatter, send_details)
             except Exception as e:
@@ -368,36 +375,40 @@ class AlertsService(BaseServicePlugin):
 
         self._persist_seen_ids(source)
 
-    def _send_pace_seconds(self) -> float:
-        """Delay between successive sends within one poll, paced to the bot's own
-        global TX rate limit (plus a small margin) so a burst of new alerts doesn't
-        collide with it and get silently dropped."""
-        try:
-            configured = self.bot.config.getfloat("Bot", "rate_limit_seconds", fallback=2.0)
-        except (ValueError, TypeError):
-            configured = 2.0
-        return configured + 0.3
-
     async def _send_alert(
         self,
         record: dict[str, Any],
         formatter: Callable[[dict[str, Any]], str],
         send_details: bool,
     ) -> bool:
-        """Returns True only if the primary compact message actually sent."""
+        """Returns True only if every chunk of the primary message actually sent.
+
+        Long text is split into several messages (split_text_into_utf8_chunks +
+        send_channel_messages_chunked -- the same word/codepoint-safe chunking and
+        TX-rate-limit-paced multi-send the rest of the bot already uses) rather
+        than truncated, so nothing is silently cut off mid-sentence.
+        """
         text = formatter(record)
-        sent = await self.bot.command_manager.send_channel_message(
-            self.channel, text, scope=self.get_mesh_flood_scope()
+        chunks = self.bot.command_manager.split_text_into_utf8_chunks(
+            text, MESSAGE_CHUNK_MAX_BYTES
+        )
+        sent = await self.bot.command_manager.send_channel_messages_chunked(
+            self.channel, chunks, scope=self.get_mesh_flood_scope()
         )
         if not sent:
             return False
+
         if send_details:
             description = record.get("description")
-            if description:
-                await self.bot.command_manager.send_channel_message(
-                    self.channel,
-                    truncate_string(description, COMPACT_MESSAGE_MAX_LEN),
-                    scope=self.get_mesh_flood_scope(),
+            # Skip when the formatter already merged the description into `text`
+            # (RSO) -- only IMGW's header omits it, so only IMGW gets a real
+            # follow-up here; sending it again for RSO would just duplicate.
+            if description and description not in text:
+                detail_chunks = self.bot.command_manager.split_text_into_utf8_chunks(
+                    description, MESSAGE_CHUNK_MAX_BYTES
+                )
+                await self.bot.command_manager.send_channel_messages_chunked(
+                    self.channel, detail_chunks, scope=self.get_mesh_flood_scope()
                 )
         return True
 
