@@ -15,16 +15,34 @@ The main sections include:
 | `[Bot]` | Bot name, database path, response toggles, command prefix |
 | `[Connection]` | Serial, BLE, or TCP connection to the MeshCore device |
 | `[Channels]` | Channels to monitor, DM behavior, optional channel keyword whitelist |
+| `[Localization]` | Default response language and optional sender-language detection |
 | `[Admin_ACL]` | Admin public keys and admin-only commands |
 | `[Keywords]` | Keyword → response pairs |
 | `[Weather]` | Units and settings shared by `wx` / `gwx` and Weather Service |
 | `[Logging]` | Log file path and level |
-| `[Web_Viewer]` | Web dashboard (host, port, password, auto_start) |
-| `[Data_Retention]` | Database table retention periods — see [Data retention](data-retention.md) |
-| `[Rate_Limits]` | Per-channel minimum seconds between bot messages |
-| `[Webhook]` | Inbound HTTP POST relay to channels or DMs |
-| `[Version_Command]` | `version` / `ver` command |
-| `[Schedule_Command]` | `schedule` command visibility |
+
+### Connection: type and precedence
+
+`connection_type` in `[Connection]` selects the transport. **Only the matching keys are read**; other keys in the section are ignored at runtime (no error).
+
+| `connection_type` | Keys used | Notes |
+|-------------------|-----------|--------|
+| `serial` | `serial_port` | USB serial device path |
+| `ble` | `ble_device_name` | Empty = auto-detect first BLE device |
+| `tcp` | `hostname`, `tcp_port` | `hostname` required; `tcp_port` defaults to 5000 |
+
+Do not use `host` or `port` under `[Connection]` — those names are for `[Web_Viewer]` and `[Webhook]` listen addresses. TCP client connect uses `hostname` and `tcp_port`.
+
+`config.ini.example` lists all connection keys uncommented so the config TUI and migrate tool recognize them. Lean templates (`minimal-example`, `quickstart`) comment out BLE/TCP keys by default because they ship with `connection_type = serial`.
+
+### Connection: transport reconnect
+
+`[Connection]` options `reconnect_max_retries` (0 = unlimited), `reconnect_delay_seconds`, and `reconnect_max_delay_seconds` apply to **serial, BLE, and TCP**. When the meshcore transport drops, the bot schedules reconnect with exponential backoff.
+
+- **TCP** — meshcore emits `DISCONNECTED` on socket loss; the bot reconnects immediately (the main loop also polls every 5s as a backup). If `radio_probe_fail_threshold` consecutive `get_time` probes fail or time out, the bot reconnects the TCP session instead of declaring a zombie radio (serial/BLE probes still use zombie detection for unresponsive firmware).
+- **Serial** — USB unplug triggers the same reconnect path; zombie detection remains for “port open but firmware dead” cases.
+
+See `config.ini.example` for defaults and `radio_probe_*` / `radio_offline_*` alert options.
 
 ### Logging and log rotation
 
@@ -33,6 +51,24 @@ The main sections include:
 - **Live changes (web viewer):** The Config tab can store **`maint.log_max_bytes`** and **`maint.log_backup_count`** in the database (`bot_metadata`). The scheduler’s maintenance loop applies those values to the existing rotating file handler **without restarting** the bot—**but only after** you save rotation settings from the web UI (which writes the metadata keys). Editing `config.ini` alone does not update `bot_metadata`, so hot-apply will not see a change until you save from the viewer (or set the keys another way).
 
 If you rely on config-file-only workflows, restart the bot after changing `[Logging]` rotation options.
+
+### Localization
+
+`[Localization] language` selects the bot's default translation catalog.
+Set `auto_detect_language = true` to let greeting-style commands reply in the
+sender's detected language when that translation is installed. Detection is
+keyword-first so short mesh greetings such as `hola`, `bonjour`, and `hallo`
+work without another dependency.
+
+For statistical detection of longer messages, install the optional extra:
+
+```bash
+pip install "meshcore-bot[lang]"
+```
+
+Detection is opt-in and falls back to the configured default language whenever
+the message is ambiguous, the detector is unavailable, or the corresponding
+translation catalog is absent.
 
 ## Channels section
 
@@ -125,36 +161,21 @@ Common per-command options (when supported by that command):
   - Comma list: only those channels
 - **`aliases`** – Extra trigger words for that command, comma-separated **stems only** (e.g. `aliases = weather, w`). Do not put the bot's **`command_prefix`** or punctuation in this value (no `!` or `.`)
 
-### Per-command aliases (v0.9)
+### Command prefix
 
-The global **`[Aliases]`** section is **deprecated**. Define aliases in each command’s own section:
+Under `[Bot]`:
 
-```ini
-[Wx_Command]
-enabled = true
-aliases = weather, w
-```
-
-Remove any legacy `[Aliases]` block when upgrading. See [Upgrade guide](upgrade.md#upgrading-from-v08--v09).
-
-### Rate limiting
-
-**`[Rate_Limits]`** sets per-channel minimum seconds between bot messages:
-
-```ini
-[Rate_Limits]
-channel.BotCmds_seconds = 15
-```
-
-Channels without an entry are unrestricted. Global and per-user rate limits remain under `[Bot]`.
-
-### Inbound webhook
-
-**`[Webhook]`** runs an HTTP server that accepts POST requests and relays JSON payloads to MeshCore channels or DMs. See `config.ini.example` for `enabled`, `host`, `port`, `secret_token`, `allowed_channels`, and `rate_limit_per_minute`. Use bearer token or `X-Webhook-Token` when `secret_token` is set.
-
-Bind to `127.0.0.1` unless your firewall restricts access. Default port **8765** (must not conflict with the web viewer on **8080**).
+- **`command_prefix`** – Optional global prefix(es) for commands. A single value (`!`, `abc`), comma-separated list (`!, ~, .`), or concatenated decorative characters (`!~.`) where the **first** entry is shown in help/docs. Leave empty for bare commands (legacy leading `!` is still accepted).
+- **`require_command_prefix`** – When `true` (default), messages must start with a configured prefix. When `false`, configured prefix(es) are stripped when present but bare commands also work. Ignored when `command_prefix` is empty.
 
 Full reference: see `config.ini.example` in the repository for every section and option, with inline comments.
+
+### Config templates
+
+- **`config.ini.example`** – Authoritative full reference; edit this when adding options or sections.
+- **`config.ini.minimal-example`** – Lean config for core testing commands only (ping, version, test, path, prefix, multitest). Hand-maintained; see its header for purpose. Point users to `config.ini.example` for full options when enabling more features.
+- **`config.ini.quickstart`** – Short easy-start config with a few common commands enabled. Hand-maintained.
+- **`scripts/config_tui.py`** (`make config`) – Uses documented keys from `config.ini.example` (including commented `#key =` lines) for validation and migrate.
 
 ## Data retention
 
@@ -165,8 +186,6 @@ Database tables (packet stream, stats, repeater data, mesh graph) are pruned aut
 The Path command has many options (presets, proximity, graph validation, etc.). All are documented in:
 
 **[Path Command](path-command-config.md)** – Presets, geographic and graph settings, and tuning.
-
-Key option: **`geographic_scoring_enabled`** (default `true`) in `[Path_Command]` — when `false`, geographic proximity guessing is disabled for path decode.
 
 ## Service plugin configuration
 
@@ -187,3 +206,19 @@ Admins can DM **`channelpause`** or **`channelresume`** (see `[Admin_ACL]` in `c
 ## Scheduled messages (`[Scheduled_Messages]`)
 
 Each entry is `<schedule_key> = <value>` where the value is normally **`channel:message`** (first colon separates channel from body). For **regional flood scope** on that send only, use **`channel:#scope:message`**: the middle segment must start with `#` (same convention as `flood_scopes` / `outgoing_flood_scope_override`). The message body may contain more colons. Omit the middle field for classic global flood. See `config.ini.example` under `[Scheduled_Messages]` for examples. The **`schedule`** command lists each job with `(#scope)` when set.
+
+### Schedule keys (APScheduler cron, not Vixie)
+
+Schedule keys are parsed by **APScheduler** `CronTrigger.from_crontab` (plus `@` presets and deprecated `HHMM`). Field order is the usual five: `minute hour day-of-month month day-of-week`.
+
+**Day-of-week numbering differs from classic Vixie / crontab(5):**
+
+| | APScheduler (this bot) | Vixie cron |
+| --- | --- | --- |
+| `0` | Monday | Sunday |
+| `1` … `6` | Tuesday … Sunday | Monday … Saturday |
+| `7` | Invalid | Often accepted as Sunday |
+
+Prefer **`mon`–`sun`** names in the DOW field so expressions stay unambiguous. Example: Monday 12:30 is `30 12 * * mon` or `30 12 * * 0` — **not** Vixie’s `30 12 * * 1` (that is Tuesday here).
+
+Preset aliases expand to those same APScheduler forms. In particular **`@weekly`** is Monday 00:00 (`0 0 * * 0`), not Sunday midnight as on many Unix crons.

@@ -36,7 +36,7 @@ class PasswordCommand(BaseCommand):
         # Check config override first
         config_pw = ''
         if self.bot.config.has_section('Web_Viewer'):
-            config_pw = self.bot.config.get('Web_Viewer', 'auth_password', fallback='').strip()
+            config_pw = self.bot.config.get('Web_Viewer', 'web_viewer_password', fallback='').strip()
 
         if config_pw.lower() == 'none':
             return await self.send_response(message, "Web viewer auth is disabled")

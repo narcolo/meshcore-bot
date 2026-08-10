@@ -27,6 +27,11 @@
       "airquality",
       "air_quality"
     ],
+    "rain": [
+      "rain",
+      "nowcast",
+      "snow"
+    ],
     "aurora": [
       "aurora",
       "kp"
@@ -51,6 +56,10 @@
       "sports",
       "score",
       "scores"
+    ],
+    "worldcup": [
+      "wc",
+      "worldcup"
     ],
     "stats": [
       "stats"
@@ -155,6 +164,10 @@
     ],
     "advert": [
       "advert"
+    ],
+    "neighbors": [
+      "neighbors",
+      "neighbours"
     ],
     "multitest": [
       "multitest",
@@ -295,6 +308,17 @@
       "no_games_team": "No games found for {team}",
       "team_not_found": "Team/League '{team}' not found. Try: seahawks, mariners, sounders, kraken, storm, chiefs, lfc, mlb, nfl, mls, wnba, epl, etc."
     },
+    "worldcup": {
+      "description": "FIFA World Cup scores, standings & nation results (in-season only)",
+      "help": "World Cup scores. Use 'wc' for today's games, 'wc group [A-L]' for standings, or 'wc [nation]' for a team's matches.",
+      "not_in_season": "No World Cup is currently in progress.",
+      "no_games_today": "No World Cup games today.",
+      "no_games_nation": "No World Cup matches found for {nation}.",
+      "groups_list": "World Cup groups: {groups}. Try 'wc group A'.",
+      "group_not_found": "Group '{group}' not found. Try a group letter, e.g. 'wc group A'.",
+      "nation_not_found": "Nation '{nation}' not found in the current World Cup.",
+      "error_fetching": "Error fetching World Cup data"
+    },
     "stats": {
       "description": "Show statistics for past 24 hours. Use 'stats messages', 'stats channels', 'stats paths', or 'stats adverts' for specific stats.",
       "help": "Show 24h bot stats. Use 'stats' (basic), 'stats messages' (users), 'stats channels' (activity), 'stats paths', 'stats adverts'",
@@ -386,6 +410,18 @@
       "cooldown_active": "Advert cooldown active. Please wait {minutes} more minutes before requesting another advert.",
       "success": "Flood advert sent successfully!",
       "error": "Error sending flood advert: {error}"
+    },
+    "neighbors": {
+      "description": "Runs a zero-hop neighbour discovery cycle (DM only)",
+      "disabled": "Neighbour discovery is not enabled. Set neighbors_enabled = true in the PacketCapture config.",
+      "busy": "A neighbour discovery cycle is already running. Try again once it finishes.",
+      "cooldown_active": "A neighbour discovery cycle ran recently. Please wait about {minutes} more minute(s) - discovery costs airtime for the whole mesh.",
+      "started": "Discovering neighbours - listening for about {seconds}s. I'll report back when done.",
+      "success": "Heard {count} neighbour(s), best SNR {best_snr}. Recorded {recorded} link(s).",
+      "published": "Published to {succeeded}/{attempted} broker(s).",
+      "none": "Discovery finished but no repeaters answered. Nothing is in direct range right now.",
+      "failed": "Neighbour discovery did not run: {reason}.",
+      "error": "Error running neighbour discovery: {error}"
     },
     "path": {
       "description": "Decode hex path data to show which repeaters were involved in message routing",
@@ -516,6 +552,35 @@
         "comet": "Comets have thin atmospheres of water vapor and dust. AQI: Variable, but you'd freeze in space anyway. ☄️"
       }
     },
+    "rain": {
+      "description": "Rain/snow nowcast: when precip starts or stops in the next ~2h, with amount",
+      "help_rain": "Rain nowcast: when rain starts/stops in ~2h, with amount. rain [city|zip|lat,lon]. Also: snow",
+      "help_snow": "Snow nowcast: when snow starts/stops in ~2h, with depth. snow [city|zip|lat,lon]. Also: rain",
+      "usage": "Usage: rain|snow [city|zipcode|lat,lon]",
+      "usage_short": "Usage: rain|snow [city|zipcode|lat,lon]",
+      "starting": "{emoji} {ptype} starting in ~{minutes}min for {location}{extra}",
+      "stopping": "{emoji} {ptype} easing in ~{minutes}min for {location}",
+      "continuing": "{emoji} {ptype} steady for {window}+ in {location}",
+      "clear": "☀️ No {precip} expected in next {window} for {location}",
+      "changeover": "{from_emoji}→{to_emoji} {first} {when} → {second} in ~{minutes}min for {location}",
+      "now": "now",
+      "duration_for": " (~{duration}min)",
+      "duration_open": " (steady)",
+      "error_fetching": "Error fetching rain nowcast data",
+      "no_location": "Usage: rain [city|zipcode|lat,lon]. No location: will use companion location if known, or bot location if not.",
+      "no_location_city": "Could not find city '{location}' in {state}",
+      "no_location_zipcode": "Could not find ZIP code '{location}'",
+      "error": "Error: {error}",
+      "precip_types": {
+        "drizzle": "Drizzle",
+        "rain": "Rain",
+        "heavy_rain": "Heavy rain",
+        "freezing": "Freezing rain",
+        "snow": "Snow",
+        "showers": "Showers",
+        "thunder": "Thunderstorms"
+      }
+    },
     "aurora": {
       "description": "Get aurora forecast (KP index and probability) for a location",
       "usage": "Usage: aurora [city|zipcode|lat,lon]",
@@ -614,7 +679,7 @@
       "category_other": "🛰️ Other: ",
       "examples": "\nExamples:\n• satpass iss\n• satpass noaa15\n• satpass 25544\n• satpass 27607 visual (visual passes only)",
       "labels": {
-        "geostationary": "{satname} appears to be geostationary or has invalid pass data. Geostationary satellites don't have traditional passes - they remain in a fixed position relative to Earth.",
+        "geostationary": "{satname}: GEO (no LEO pass)",
         "no_passes": "{satname} has no {pass_type} passes in the next 10 days from this location",
         "invalid_norad": "Provide NORAD# example use:🛰️satpass 25544,33591"
       }
@@ -1397,7 +1462,7 @@
     "management": "Management Commands"
   },
   "services": {
-    "darcmowas" : {
+    "darcmowas": {
       "messagetype": {
         "eu-alert-level-1": "Emergency Alert",
         "eu-alert-level-2": "Extreme Danger",

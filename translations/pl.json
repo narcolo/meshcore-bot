@@ -57,6 +57,12 @@
       "mecz",
       "mecze"
     ],
+    "worldcup": [
+      "wc",
+      "worldcup",
+      "mundial",
+      "ms"
+    ],
     "stats": [
       "stats"
     ],
@@ -327,6 +333,17 @@
       "no_games_team": "Nie znaleziono meczów dla drużyny {team}",
       "team_not_found": "Drużyna/Liga '{team}' nie znaleziona. Spróbuj: seahawks, mariners, sounders, kraken, storm, chiefs, lfc, mlb, nfl, mls, wnba, epl, itp."
     },
+    "worldcup": {
+      "description": "Wyniki, tabele i mecze reprezentacji Mistrzostw Świata FIFA (tylko w trakcie turnieju)",
+      "help": "Wyniki MŚ. Użyj 'wc' dla dzisiejszych meczów, 'wc group [A-L]' dla tabel lub 'wc [kraj]' dla meczów drużyny.",
+      "not_in_season": "Obecnie nie trwają żadne Mistrzostwa Świata.",
+      "no_games_today": "Dziś brak meczów MŚ.",
+      "no_games_nation": "Nie znaleziono meczów MŚ dla {nation}.",
+      "groups_list": "Grupy MŚ: {groups}. Spróbuj 'wc group A'.",
+      "group_not_found": "Nie znaleziono grupy '{group}'. Użyj litery grupy, np. 'wc group A'.",
+      "nation_not_found": "Nie znaleziono kraju '{nation}' w bieżących Mistrzostwach Świata.",
+      "error_fetching": "Błąd pobierania danych MŚ"
+    },
     "stats": {
       "description": "Pokazuje statystyki z ostatnich 24h. Użyj 'stats messages', 'stats channels', or 'stats paths' dla wybranych statystyk.",
       "help": "Show 24-hour bot statistics. Commands: 'stats' (basic), 'stats messages' (bot users), 'stats channels' (channel activity), 'stats paths' (longest paths)",
@@ -579,7 +596,7 @@
       "category_other": "🛰️ Inne: ",
       "examples": "\nPrzykłady:\n• satpass iss\n• satpass noaa15\n• satpass 25544\n• satpass 27607 visual (visual passes only)",
       "labels": {
-        "geostationary": "{satname} wydaje się być geostacjonarny lub ma nieprawidłowe dane przelotowe. Satelity geostacjonarne nie mają tradycyjnych przejść – pozostają w stałej pozycji względem Ziemi.",
+        "geostationary": "{satname}: GEO (brak przelotu LEO)",
         "no_passes": "{satname} has no {pass_type} passes in the next 10 days from this location",
         "invalid_norad": "Podaje przykład użycia NORAD#:🛰️satpass 25544,33591"
       }

@@ -60,7 +60,7 @@ Run the bot as a system service on Linux:
 
 ```bash
 sudo ./install-service.sh
-sudo nano /opt/meshcore-bot/config.ini   # configure
+sudo nano /etc/meshcore-bot/config.ini   # configure
 sudo systemctl start meshcore-bot
 sudo systemctl status meshcore-bot
 ```

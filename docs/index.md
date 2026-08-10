@@ -10,15 +10,9 @@ Documentation for the MeshCore bot: setup, configuration, commands, and services
 - [Command Reference](command-reference.md) – Full command reference
 - [Docker deployment](docker.md) – Docker deployment
 - [Service installation](service-installation.md) – Systemd service setup
-- [Web Viewer](web-viewer.md) – Authenticated dashboard with live streams
-
-## Operations
-
-| Document | Description |
-|----------|-------------|
-| [Upgrade guide](upgrade.md) | Migrating from v0.7, v0.8, or earlier to v0.9 |
-| [Data retention](data-retention.md) | Database cleanup schedules and defaults |
-| [FAQ](faq.md) | Common installation and upgrade questions |
+- [Web Viewer](web-viewer.md) – Web viewer module
+- [Upgrade guide](upgrade.md) – What changes between releases, and how to upgrade
+- [FAQ](faq.md) – Common problems and fixes
 
 ## Configuration
 
@@ -27,6 +21,9 @@ Documentation for the MeshCore bot: setup, configuration, commands, and services
 | [Configuration](configuration.md) | config.ini structure and command options |
 | [Path Command](path-command-config.md) | Path command presets and tuning |
 | [Config validation](config-validation.md) | Validate config.ini before starting the bot |
+| [Data retention](data-retention.md) | How long the bot keeps captured data |
+| [Local plugins and services](local-plugins.md) | Add your own commands and services |
+| [Check-in API](checkin-api.md) | Submit check-ins to an external web API |
 
 ## Guides
 
@@ -34,7 +31,8 @@ Documentation for the MeshCore bot: setup, configuration, commands, and services
 |----------|-------------|
 | [Repeater Commands](repeater-commands.md) | Repeater management DM commands |
 | [Feed Management](FEEDS.md) | RSS/REST feeds and posting to channels |
-| [Web Viewer](web-viewer.md) | Web dashboard, real-time streams, and API |
+| [Web Viewer](web-viewer.md) | Web-based data viewer and API |
+| [Custom command website](command-reference-website.md) | Generate an HTML command reference for your users |
 
 ## Service Plugins
 
@@ -48,3 +46,4 @@ Documentation for the MeshCore bot: setup, configuration, commands, and services
 | [Map Uploader](map-uploader.md) | Uploading to map.meshcore.dev |
 | [Weather Service](weather-service.md) | Scheduled weather and alerts |
 | [Repeater Prefix Collision Service](repeater-prefix-collision-service.md) | Detect repeater prefix collisions |
+| [World Cup](worldcup.md) | World Cup command and live match announcements |

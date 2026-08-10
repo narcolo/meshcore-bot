@@ -42,7 +42,7 @@ Moving an old database into a new install can cause those errors when:
      ```bash
      sudo -u meshcore /opt/meshcore-bot/venv/bin/python -c "
      import sqlite3
-     p = '/opt/meshcore-bot/meshcore_bot.db'
+     p = '/var/lib/meshcore-bot/meshcore_bot.db'
      c = sqlite3.connect(p)
      c.execute('DELETE FROM feed_message_queue WHERE sent_at IS NULL')
      c.execute(\"DELETE FROM channel_operations WHERE status = 'pending'\")
@@ -54,7 +54,7 @@ Moving an old database into a new install can cause those errors when:
    - Or with the `sqlite3` CLI if available:
      `sqlite3 /path/to/meshcore_bot.db "DELETE FROM feed_message_queue WHERE sent_at IS NULL; DELETE FROM channel_operations WHERE status = 'pending';"`
    - To clear only pending channel ops:
-     `sudo -u meshcore /opt/meshcore-bot/venv/bin/python -c "import sqlite3; c=sqlite3.connect('/opt/meshcore-bot/meshcore_bot.db'); c.execute(\"DELETE FROM channel_operations WHERE status = 'pending'\"); c.commit(); print('Cleared pending channel ops'); c.close()"`
+     `sudo -u meshcore /opt/meshcore-bot/venv/bin/python -c "import sqlite3; c=sqlite3.connect('/var/lib/meshcore-bot/meshcore_bot.db'); c.execute(\"DELETE FROM channel_operations WHERE status = 'pending'\"); c.commit(); print('Cleared pending channel ops'); c.close()"`
 3. **Timeout** — If the log line has nothing after the colon, the exception is often a 30s timeout (scheduler runs queue/ops with a 30s limit). A large backlog or slow DB can trigger it; clearing pending queue/ops as above usually fixes it.
 
 After pulling the latest code, the next time an error occurs the log will include a full traceback (exception type and message), which makes the cause clear.

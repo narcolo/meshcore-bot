@@ -5,7 +5,6 @@ The Discord Bridge service posts MeshCore channel messages to Discord channels v
 **Features:**
 - One-way message flow (MeshCore → Discord only)
 - Multi-channel mapping (map multiple MeshCore channels to different Discord channels)
-- **Multi-webhook fan-out** — comma-separated webhook URLs per MeshCore channel
 - Webhook-based (simple, secure, no bot permissions needed)
 - **DMs are NEVER bridged** (hardcoded for privacy)
 - Rate limit monitoring (warns when approaching Discord's limits)
@@ -30,9 +29,8 @@ Edit `config.ini`:
 [DiscordBridge]
 enabled = true
 
-# Map MeshCore channels to Discord webhooks (comma-separated for multiple destinations)
+# Map MeshCore channels to Discord webhooks
 bridge.general = https://discord.com/api/webhooks/YOUR_WEBHOOK_URL_HERE
-# bridge.alerts = https://discord.com/api/webhooks/URL1,https://discord.com/api/webhooks/URL2
 ```
 
 ### 3. Restart Bot
@@ -139,7 +137,7 @@ seriously, there are some people...
 
 MeshCore @ mentions are cleaned up and bolded: `@[username]` → `**@username**`
 
-Bridged messages never trigger Discord mention notifications (`@everyone`, `@here`, roles, or users). The webhook sets `allowed_mentions` so mesh highlights display as plain text only.
+Bridged messages never trigger Discord mention notifications (`@everyone`, `@here`, roles, or users). The webhook sets `allowed_mentions` and neutralizes `@` in message text so mesh highlights stay plain text (no blue mention tags).
 
 ---
 

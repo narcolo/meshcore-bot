@@ -86,34 +86,27 @@ greetings
 
 ### `cmd`
 
-List available commands in compact format, or return a configured reference URL.
+List available commands in compact format.
 
 **Usage:**
 ```
 cmd
 ```
 
-**Response:** Compact list of all available commands, unless `[Cmd_Command]` sets `cmd_reference_url` — then the bot replies with `Full command reference: <url>` instead of the inline list.
-
-**Configuration:** `[Cmd_Command]` — `enabled`, `cmd_reference_url` (optional).
+**Response:** Compact list of all available commands.
 
 ---
 
-### `version` or `ver`
+### `version`
 
 Show the bot's current software version.
-
-**Aliases:** `ver`
 
 **Usage:**
 ```
 version
-ver
 ```
 
-**Response:** `@[User] Bot version: v0.9.x` (or branch-commit on non-release builds).
-
-**Configuration:** `[Version_Command]` — `enabled` (default true).
+**Response:** Version string for the running MeshCore bot build.
 
 ---
 
@@ -177,10 +170,8 @@ wxa 10001
 
 **Response:** Current weather conditions, forecast for tonight/tomorrow, and active weather alerts. Includes:
 - Current conditions (temperature, humidity, wind, etc.)
-- Short-term forecast (tonight, tomorrow) with **high/low** temperatures when available
+- Short-term forecast (tonight, tomorrow)
 - Weather alerts if any are active
-
-**Configuration:** `[Weather]` — `weather_provider` (`noaa` or `openmeteo`), `temperature_high_low_format`, `use_bot_location_when_no_location`, and optional **`custom.mqtt_weather.*`** topics for MQTT-sourced weather.
 
 **Note:** Weather alerts are automatically included when available.
 
@@ -212,11 +203,11 @@ gwx 35.6762,139.6503
 - Current temperature and conditions
 - Feels-like temperature
 - Wind speed and direction
-- Humidity, dew point, visibility, pressure
-- Forecast with **high/low** temperatures
-- **Multi-day** forecasts when requested (e.g. `gwx Tokyo 7` or `7d` suffix — see `config.ini.example`)
-
-**Configuration:** `[Weather]` — `openmeteo_model` (model selection), `use_bot_location_when_no_location` (fallback when no location in message), `temperature_high_low_format`, and optional **`custom.mqtt_weather.<name>`** MQTT topics.
+- Humidity
+- Dew point
+- Visibility
+- Pressure
+- Forecast for today/tonight and tomorrow
 
 ---
 
@@ -248,6 +239,44 @@ aqi help
 - European AQI (if available)
 - Pollutant concentrations (PM2.5, PM10, Ozone, etc.)
 - Health recommendations
+
+---
+
+### `rain <location>`
+
+Minute-level rain nowcast — tells you when precipitation is about to **start** or **stop** in the next couple hours, using Open-Meteo's 15-minutely precipitation forecast. Works worldwide with no API key.
+
+**Aliases:** `nowcast`, `snow`
+
+**Usage:**
+```
+rain [city|zipcode|lat,lon]
+nowcast [city|zipcode|lat,lon]
+snow [city|zipcode|lat,lon]
+```
+
+**Examples:**
+```
+rain
+rain seattle
+rain 98101
+rain 47.6,-122.3
+snow denver
+```
+
+**Response:** A single line describing the upcoming precipitation, for example:
+- `🌧️ Rain starting in ~25min for Seattle (~45min)` — dry now, rain expected (with rough duration)
+- `🌧️ Rain easing in ~20min for Seattle` — raining now, clearing soon
+- `🌧️ Heavy rain steady for 2h+ in Seattle` — raining now, no break in the window
+- `☀️ No rain expected in next 2h for Seattle` — dry through the window
+
+The keyword sets which precipitation the answer leads with: `rain`/`nowcast` lead with rain (liquid amount), while `snow` leads with snowfall (reported as depth, e.g. `🌨️ Snow starting in ~40min (~1.5 in snow)`). Either keyword still mentions the other type when it's in the window, and snow/ice changeovers are called out. Bare countries or US states (e.g. `rain france`, `snow texas`) default to the region's capital with a heads-up, since one centroid isn't representative.
+
+When no location is given, uses the sender's companion location if known, then the bot's configured location.
+
+**Configuration:** `[Rain_Command]` — `enabled`, `window_minutes` (how far ahead to look, default 120), `precip_threshold_mm` (sensitivity, default 0.1), and optional `default_lat`/`default_lon`. Temperature/precipitation source units are shared via `[Weather]` (`weather_model` is honored).
+
+**Note:** Falls back to hourly precipitation when a weather model doesn't provide 15-minute data for the area.
 
 ---
 
@@ -288,7 +317,7 @@ overhead <latitude>,<longitude>
 - `ladd` - Show only LADD aircraft
 - `pia` - Show only PIA aircraft
 - `squawk=<code>` - Filter by transponder squawk code
-- `limit=<n>` - Limit API fetch size (overrides `[Airplanes_Command]` `max_results` for this request)
+- `limit=<n>` - Limit number of results (default: 10, max: 50)
 - `closest` - Sort by distance (closest first)
 - `highest` - Sort by altitude (highest first)
 - `fastest` - Sort by speed (fastest first)
@@ -307,14 +336,15 @@ airplanes 47.6,-122.3 radius=25 closest
 ```
 
 **Response:**
-- **Single aircraft** (`overhead`): Detailed format with callsign, type, altitude, speed, track, distance, bearing, vertical rate, and registration
-- **Multiple aircraft**: All matches are packed into **one mesh message** (RF length limited). If not everything fits, the reply ends with `...+N more` for the remainder count
+- **Single aircraft**: Detailed format with callsign, type, altitude, speed, track, distance, bearing, vertical rate, and registration
+- **Multiple aircraft**: Compact list format with callsign, altitude, speed, distance, and bearing
 
-**Configuration:** `[Airplanes_Command]`:
+**Configuration:**
+The command can be configured in `config.ini` under `[Airplanes_Command]`:
 - `enabled` - Enable/disable the command
 - `api_url` - API endpoint URL (default: `http://api.airplanes.live/v2/`)
 - `default_radius` - Default search radius in nautical miles
-- `max_results` - Default API result cap (`0` = no configured cap; output is still bounded by single-message RF limits)
+- `max_results` - Maximum number of results to return
 - `url_timeout` - API request timeout in seconds
 
 **Note:** Uses companion location from database if available, otherwise falls back to bot location from config. The API is rate-limited to 1 request per second.
@@ -380,6 +410,10 @@ solar
 - A-index and K-index
 - HF band conditions (Open/Closed/Marginal)
 - Solar activity summary
+
+Data comes from HamQSL and NOAA SWPC. For the provenance of the underlying
+`modules/solar_conditions.py` implementation, see
+[Solar conditions rewrite provenance](solar-conditions-provenance.md).
 
 ---
 
@@ -637,32 +671,6 @@ catfact
 
 ---
 
-### RandomLine (configurable triggers)
-
-Not a single fixed command name — **`[RandomLine]`** defines trigger words that return a random line from a text file. Useful for fortunes, facts, or custom responses.
-
-**Example config** (see `config.ini.example`):
-
-```ini
-[RandomLine]
-triggers.fortune = fortune,fortunes
-file.fortune = data/randomlines/fortunes.txt
-prefix.fortune = 🥠
-```
-
-**Usage:** Send an exact trigger word (e.g. `fortune`) as the message or command stem.
-
-**Options per entry:**
-- `triggers.<key>` — Comma-separated trigger words (exact match after parsing)
-- `file.<key>` — Path to line-delimited text file (BSD fortune format supported)
-- `prefix.<key>` — String prepended to the chosen line
-- `channel.<key>` / `channels.<key>` — Restrict to specific channels
-- `category.<key>` — Website command-reference category
-
-There is no separate built-in `fortune` command — use RandomLine with a fortunes file.
-
----
-
 ## Sports Commands
 
 ### `sports`
@@ -684,15 +692,36 @@ sports mlb
 
 **Response:** Current scores and game information for the requested teams or league.
 
+> World Cup scores are also available year-round here, e.g. `sports fifa`.
+
+---
+
+### `wc` or `worldcup`
+
+FIFA World Cup scores and schedule. Responds **only while a World Cup (men's or women's) is actually in progress** — the active tournament is auto-detected from the ESPN schedule, so no dates need to be configured. Outside a tournament it replies that none is in progress.
+
+**Usage:**
+- `wc` - Live/most recent scores and upcoming fixtures
+- `wc <nation>` - Focus on a specific nation's match
+
+**Examples:**
+```
+wc
+worldcup
+wc argentina
+```
+
+**Response:** Current scores, match state, and upcoming fixtures for the active tournament.
+
+**Configuration:** `[Worldcup_Command]` — `enabled`, `api_timeout`, `cache_ttl_minutes`. For proactive live match announcements posted to a channel, see the [World Cup Live Service](service-plugins.md).
+
 ---
 
 ## MeshCore Utility Commands
 
 ### `path` or `decode` or `route`
 
-Decode and display the routing path of a message. Supports **multi-byte** hop encodings (1-, 2-, and 3-byte prefixes) when present in the path.
-
-**Aliases:** `decode`, `route`
+Decode and display the routing path of a message.
 
 **Usage:**
 ```
@@ -701,13 +730,7 @@ decode
 route
 ```
 
-**Response:** Routing path through the mesh, including intermediate nodes. Repeater selection may use graph validation, proximity scoring, and configured presets.
-
-**Configuration:** `[Path_Command]` — see [Path Command](path-command-config.md) for presets, graph settings, and tuning. Key option:
-
-- **`geographic_scoring_enabled`** (default `true`) — When `false`, geographic proximity guessing is disabled for path decode. This is a **config** toggle, not a chat subcommand.
-
-Optional **`enable_p_shortcut`** (default true) allows abbreviated path selection flows documented in the Path Command guide.
+**Response:** Shows the complete routing path the message took through the mesh network, including all intermediate nodes.
 
 ---
 
@@ -935,7 +958,7 @@ repeater stats
 - NEW_CONTACT events are automatically monitored
 - Repeaters are automatically cataloged when discovered
 - Contact list capacity is monitored in real-time
-- `auto_manage_contacts = device`: Firmware auto-adds **chat (companion)** peers only, with **overwrite oldest non-favourite** when the contact table is full; the bot schedules delayed jobs to set that firmware policy and to **favourite** keys in `Admin_ACL` plus the effective announcements ACL (same rules as the announcements command), then clear **favourite** on other contacts. The bot still runs capacity management on NEW_CONTACT (near-limit `manage_contact_list`) and does **not** call `add_contact` for new companions itself. **Contact limit** for logging and capacity is taken from the radio’s `max_contacts` and, if the live table is larger (under-reported max), raised to match the mesh so counts are not shown as over-capacity. **Companion auto-purge** never runs on the radio in this mode. Count-based **repeater** auto-purge only runs if the table grows **strictly above** that synced limit (normally off while the firmware manages slots).
+- `auto_manage_contacts = device` (default): Firmware auto-adds **chat (companion)** peers only, with **overwrite oldest non-favourite** when the contact table is full; the bot schedules delayed jobs to set that firmware policy and to **favourite** keys in `Admin_ACL` plus the effective announcements ACL (same rules as the announcements command), then clear **favourite** on other contacts. The bot still runs capacity management on NEW_CONTACT (near-limit `manage_contact_list`) and does **not** call `add_contact` for new companions itself. **Contact limit** for logging and capacity is taken from the radio’s `max_contacts` and, if the live table is larger (under-reported max), raised to match the mesh so counts are not shown as over-capacity. **Companion auto-purge** never runs on the radio in this mode. Count-based **repeater** auto-purge only runs if the table grows **strictly above** that synced limit (normally off while the firmware manages slots).
 - `auto_manage_contacts = bot`: Bot adds new companions via `add_contact` (full NEW_CONTACT payload), runs **manage-before-add** when the list is near limit, and **retries once** after `manage_contact_list` if the radio returns `TABLE_FULL`.
 - `auto_manage_contacts = false`: Manual mode - NEW_CONTACT companions are tracked in the database only; use `!repeater` commands to manage the device list.
 
@@ -1062,11 +1085,32 @@ View configured scheduled messages and advert interval.
 schedule
 ```
 
-**Response:** Lists scheduled posts from `[Scheduled_Messages]` (cron or preset schedule, or legacy `HH:MM` keys) plus current advert timing. Scoped entries show regional flood scope when configured (`channel:#scope:message`).
+**Response:** Lists configured scheduled posts (each line shows the cron or preset schedule, or legacy `HH:MM` if you still use deprecated HHMM keys) plus current advert timing.
 
-**Configuration:** `[Schedule_Command]` — `enabled`, `dm_only` (default true: schedule is visible in DMs only unless changed).
+**Note:** DM-only command by default. Cron day-of-week uses APScheduler numbering (0=Monday), not Vixie cron — see [Scheduled messages](configuration.md#scheduled-messages-scheduled_messages).
 
-**Note:** Admin-level visibility; configure `dm_only = false` to allow channel use.
+---
+
+### `webviewer` or `web` or `viewer` or `wv`
+
+Manage the web viewer integration.
+
+**Usage:**
+```
+webviewer <subcommand>
+```
+
+**Subcommands:**
+
+| Subcommand | Description |
+|------------|-------------|
+| `status` | Report enabled/running state, URL, circuit-breaker state, failure count, and shutdown state |
+| `reset` | Reset the integration's circuit breaker after repeated failures |
+| `restart` | Restart the web viewer process |
+
+**Response:** A compact status line, or confirmation that the reset or restart was initiated.
+
+**Note:** DM-only command. Disable with `enabled = false` under `[WebViewer_Command]`.
 
 ---
 

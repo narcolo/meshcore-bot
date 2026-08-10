@@ -31,6 +31,10 @@ class TheSportsDBClient:
         self.min_request_interval = 2.1  # Slightly more than 2 seconds for safety
         self.cache_ttl = cache_ttl
         self._cache: Dict[str, Tuple[float, Any]] = {}
+        # Serializes _rate_limit: without it concurrent callers (asyncio.gather)
+        # all read the same last_request_time, sleep the same amount, and fire
+        # together — bursting straight past the throttle.
+        self._rate_limit_lock = asyncio.Lock()
 
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or create an aiohttp session"""
@@ -39,13 +43,19 @@ class TheSportsDBClient:
         return self.session
 
     async def _rate_limit(self):
-        """Enforce rate limiting asynchronously"""
-        current_time = time.time()
-        time_since_last = current_time - self.last_request_time
-        if time_since_last < self.min_request_interval:
-            sleep_time = self.min_request_interval - time_since_last
-            await asyncio.sleep(sleep_time)
-        self.last_request_time = time.time()
+        """Enforce rate limiting asynchronously.
+
+        The read/sleep/write must be atomic with respect to other callers, so
+        the whole sequence is held under a lock — each waiter re-reads
+        last_request_time only after the previous one has claimed its slot.
+        """
+        async with self._rate_limit_lock:
+            current_time = time.time()
+            time_since_last = current_time - self.last_request_time
+            if time_since_last < self.min_request_interval:
+                sleep_time = self.min_request_interval - time_since_last
+                await asyncio.sleep(sleep_time)
+            self.last_request_time = time.time()
 
     def _cache_get(self, key: str) -> Optional[Any]:
         if self.cache_ttl <= 0 or key not in self._cache:
