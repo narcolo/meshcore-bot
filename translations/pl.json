@@ -1371,8 +1371,8 @@
         "normal_prefix": "Jakość powietrza wróciła do normy"
       },
       "paa": {
-        "prefix": "Podwyższone promieniowanie",
-        "normal_prefix": "Promieniowanie w normie"
+        "digest_prefix": "Promieniowanie PAA",
+        "no_data": "brak danych"
       },
       "until": "do {time}"
     }
