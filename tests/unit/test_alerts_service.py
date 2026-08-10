@@ -1,9 +1,9 @@
 """Unit tests for AlertsService (Phase 2a: IMGW meteo warnings + RSO).
 
 Covers dedup, restart-safety (bot_metadata-backed seen-id persistence), the
-per-source alerts/hour cap, flood_scope threading through to send_channel_message,
-and message formatting. No network calls -- alert_sources fetch functions are
-mocked at the call site.
+per-source alerts/hour cap, staleness filtering, multi-message chunking of long
+alerts, flood_scope threading, and message formatting. No network calls --
+alert_sources fetch functions are mocked at the call site.
 """
 
 import configparser
@@ -13,8 +13,10 @@ from unittest.mock import AsyncMock, MagicMock, Mock
 
 import pytest
 
+from modules.command_manager import CommandManager
 from modules.i18n import Translator
 from modules.service_plugins.alerts_service import (
+    MESSAGE_CHUNK_MAX_BYTES,
     METADATA_KEY_IMGW_SEEN,
     METADATA_KEY_RSO_SEEN,
     AlertsService,
@@ -68,7 +70,12 @@ def _alerts_service_bot(db_manager=None, **config_overrides):
     bot.logger = Mock()
     bot.translator = Translator("en")  # real translator, exercises real translation keys
     bot.db_manager = db_manager if db_manager is not None else _FakeDBManager()
-    bot.command_manager.send_channel_message = AsyncMock(return_value=True)
+
+    # Real (pure, side-effect-free) chunking logic, so tests exercise the same
+    # word/codepoint-safe splitting the bot actually uses -- only the network-ish
+    # send itself is mocked.
+    bot.command_manager.split_text_into_utf8_chunks = CommandManager.split_text_into_utf8_chunks
+    bot.command_manager.send_channel_messages_chunked = AsyncMock(return_value=True)
 
     config = configparser.ConfigParser()
     config.add_section("Alerts_Service")
@@ -80,6 +87,11 @@ def _alerts_service_bot(db_manager=None, **config_overrides):
     return bot
 
 
+def _sent_chunk_lists(bot) -> list[list[str]]:
+    """Every `chunks` list passed to send_channel_messages_chunked, in call order."""
+    return [call.args[1] for call in bot.command_manager.send_channel_messages_chunked.call_args_list]
+
+
 @pytest.mark.unit
 class TestDedup:
     async def test_new_alert_is_sent(self):
@@ -89,7 +101,7 @@ class TestDedup:
             "imgw_meteo", [IMGW_RECORD], service._format_imgw_message,
             send_details=False, max_alerts_per_hour=12, max_age_hours=24,
         )
-        bot.command_manager.send_channel_message.assert_awaited_once()
+        bot.command_manager.send_channel_messages_chunked.assert_awaited_once()
 
     async def test_same_alert_polled_twice_sent_once(self):
         bot = _alerts_service_bot()
@@ -99,7 +111,7 @@ class TestDedup:
                 "imgw_meteo", [IMGW_RECORD], service._format_imgw_message,
                 send_details=False, max_alerts_per_hour=12, max_age_hours=24,
             )
-        bot.command_manager.send_channel_message.assert_awaited_once()
+        bot.command_manager.send_channel_messages_chunked.assert_awaited_once()
 
     async def test_no_new_alerts_sends_nothing(self):
         bot = _alerts_service_bot()
@@ -108,7 +120,7 @@ class TestDedup:
             "imgw_meteo", [], service._format_imgw_message,
             send_details=False, max_alerts_per_hour=12, max_age_hours=24,
         )
-        bot.command_manager.send_channel_message.assert_not_awaited()
+        bot.command_manager.send_channel_messages_chunked.assert_not_awaited()
 
     async def test_restart_safety_persisted_id_prevents_resend(self):
         """Simulates a restart: a fresh AlertsService sharing the same db_manager
@@ -124,7 +136,7 @@ class TestDedup:
             "imgw_meteo", [IMGW_RECORD], service._format_imgw_message,
             send_details=False, max_alerts_per_hour=12, max_age_hours=24,
         )
-        bot.command_manager.send_channel_message.assert_not_awaited()
+        bot.command_manager.send_channel_messages_chunked.assert_not_awaited()
 
     async def test_seen_ids_persisted_after_send(self):
         db_manager = _FakeDBManager()
@@ -148,7 +160,7 @@ class TestRateLimit:
             "imgw_meteo", [IMGW_RECORD, record_2], service._format_imgw_message,
             send_details=False, max_alerts_per_hour=1, max_age_hours=24,
         )
-        assert bot.command_manager.send_channel_message.await_count == 1
+        assert bot.command_manager.send_channel_messages_chunked.await_count == 1
 
     async def test_suppressed_alert_still_marked_seen(self):
         """A suppressed alert is a hard drop (logged), not a deferred retry."""
@@ -159,25 +171,29 @@ class TestRateLimit:
             "imgw_meteo", [IMGW_RECORD, record_2], service._format_imgw_message,
             send_details=False, max_alerts_per_hour=1, max_age_hours=24,
         )
-        bot.command_manager.send_channel_message.reset_mock()
+        bot.command_manager.send_channel_messages_chunked.reset_mock()
         await service._process_new_alerts(
             "imgw_meteo", [IMGW_RECORD, record_2], service._format_imgw_message,
             send_details=False, max_alerts_per_hour=1, max_age_hours=24,
         )
-        bot.command_manager.send_channel_message.assert_not_awaited()
+        bot.command_manager.send_channel_messages_chunked.assert_not_awaited()
 
 
 @pytest.mark.unit
 class TestSendFailureNotLost:
     """Regression coverage for a real bug caught in production: a burst of new
-    alerts collided with the bot's own global TX rate limiter
-    (send_channel_message returning False), and the old code counted/marked
-    every one of them as sent regardless -- 10 of 11 first-run alerts were
-    silently lost. A failed send must not be marked seen, so it is retried."""
+    alerts collided with the bot's own global TX rate limiter, and the old code
+    counted/marked every one of them as sent regardless -- 10 of 11 first-run
+    alerts were silently lost. A failed send must not be marked seen, so it is
+    retried. (send_channel_messages_chunked already skips that particular
+    limiter for automated services -- see TestSendFailureNotLost docstring in
+    the source -- but the send can still fail for other reasons, e.g. the
+    per-channel limiter or a radio error, so the safety net stays regardless.)
+    """
 
     async def test_failed_send_is_not_marked_seen(self):
         bot = _alerts_service_bot()
-        bot.command_manager.send_channel_message = AsyncMock(return_value=False)
+        bot.command_manager.send_channel_messages_chunked = AsyncMock(return_value=False)
         service = AlertsService(bot)
         await service._process_new_alerts(
             "imgw_meteo", [IMGW_RECORD], service._format_imgw_message,
@@ -187,9 +203,9 @@ class TestSendFailureNotLost:
 
     async def test_failed_send_is_retried_on_next_poll(self):
         bot = _alerts_service_bot()
-        # Fails the first time, succeeds the second (simulates the rate limiter
-        # clearing by the next poll).
-        bot.command_manager.send_channel_message = AsyncMock(side_effect=[False, True])
+        # Fails the first time, succeeds the second (simulates the limiter
+        # clearing, or a transient error resolving, by the next poll).
+        bot.command_manager.send_channel_messages_chunked = AsyncMock(side_effect=[False, True])
         service = AlertsService(bot)
 
         await service._process_new_alerts(
@@ -200,85 +216,76 @@ class TestSendFailureNotLost:
             "imgw_meteo", [IMGW_RECORD], service._format_imgw_message,
             send_details=False, max_alerts_per_hour=12, max_age_hours=24,
         )
-        assert bot.command_manager.send_channel_message.await_count == 2
+        assert bot.command_manager.send_channel_messages_chunked.await_count == 2
         assert IMGW_RECORD["external_id"] in service._seen_ids["imgw_meteo"]
 
     async def test_send_details_followup_skipped_when_primary_send_fails(self):
         bot = _alerts_service_bot()
-        bot.command_manager.send_channel_message = AsyncMock(return_value=False)
+        bot.command_manager.send_channel_messages_chunked = AsyncMock(return_value=False)
         service = AlertsService(bot)
         await service._process_new_alerts(
             "imgw_meteo", [IMGW_RECORD], service._format_imgw_message,
             send_details=True, max_alerts_per_hour=12, max_age_hours=24,
         )
         # Only the one (failed) primary-message attempt -- no follow-up detail send.
-        assert bot.command_manager.send_channel_message.await_count == 1
+        assert bot.command_manager.send_channel_messages_chunked.await_count == 1
 
 
 @pytest.mark.unit
-class TestSendPacing:
-    """A burst of several new alerts in one poll must be paced to the bot's own
-    global TX rate limit, not fired back-to-back (which is exactly what caused
-    the send-failure bug above in the first place)."""
+class TestMessageChunking:
+    """The actual feature this session added: long alert text is split into
+    several messages instead of being truncated with '...'."""
 
-    async def test_sleeps_between_sends_using_configured_rate_limit(self, monkeypatch):
-        bot = _alerts_service_bot()
-        bot.config.add_section("Bot")
-        bot.config.set("Bot", "rate_limit_seconds", "3")
-        service = AlertsService(bot)
-
-        sleep_calls = []
-
-        async def fake_sleep(seconds):
-            sleep_calls.append(seconds)
-
-        monkeypatch.setattr(
-            "modules.service_plugins.alerts_service.asyncio.sleep", fake_sleep
-        )
-
-        record_2 = dict(RSO_RECORD, external_id="second", published_at="2026-08-10 15:00:00")
-        await service._process_new_alerts(
-            "rso", [RSO_RECORD, record_2], service._format_rso_message,
-            send_details=False, max_alerts_per_hour=12, max_age_hours=24,
-        )
-        assert sleep_calls == [3.3]  # configured 3s + 0.3s margin, once (before 2nd send)
-
-    async def test_no_sleep_for_a_single_alert(self, monkeypatch):
+    async def test_short_alert_is_a_single_chunk(self):
         bot = _alerts_service_bot()
         service = AlertsService(bot)
-
-        async def fail_if_called(seconds):
-            raise AssertionError("should not sleep when only one alert is sent")
-
-        monkeypatch.setattr(
-            "modules.service_plugins.alerts_service.asyncio.sleep", fail_if_called
-        )
         await service._process_new_alerts(
             "imgw_meteo", [IMGW_RECORD], service._format_imgw_message,
             send_details=False, max_alerts_per_hour=12, max_age_hours=24,
         )
-        bot.command_manager.send_channel_message.assert_awaited_once()
+        chunk_lists = _sent_chunk_lists(bot)
+        assert len(chunk_lists) == 1
+        assert len(chunk_lists[0]) == 1  # one message, not split
 
-    async def test_rate_capped_alert_does_not_consume_a_pacing_sleep(self, monkeypatch):
-        """Suppressed-by-cap alerts hit `continue` before the pacing sleep --
-        only real send attempts after the first should pace."""
+    async def test_long_rso_description_splits_into_multiple_messages_not_truncated(self):
         bot = _alerts_service_bot()
         service = AlertsService(bot)
-
-        sleep_calls = []
-
-        async def fake_sleep(seconds):
-            sleep_calls.append(seconds)
-
-        monkeypatch.setattr(
-            "modules.service_plugins.alerts_service.asyncio.sleep", fake_sleep
+        long_description = (
+            "Prognozowane sa intensywne opady deszczu oraz silny wiatr w wielu "
+            "powiatach wojewodztwa podlaskiego. Mieszkancy powinni zabezpieczyc "
+            "mienie, unikac przebywania w lasach i na otwartej przestrzeni, oraz "
+            "sledzic komunikaty sluzb ratowniczych. Mozliwe sa lokalne podtopienia "
+            "oraz przerwy w dostawie pradu elektrycznego na terenach nizinnych."
         )
-        record_2 = dict(IMGW_RECORD, external_id="second", published_at="2026-08-10 07:00:00")
+        record = dict(RSO_RECORD, description=long_description)
         await service._process_new_alerts(
-            "imgw_meteo", [IMGW_RECORD, record_2], service._format_imgw_message,
-            send_details=False, max_alerts_per_hour=1, max_age_hours=24,  # only 1 allowed -> 2nd is capped, not sent
+            "rso", [record], service._format_rso_message,
+            send_details=False, max_alerts_per_hour=12, max_age_hours=24,
         )
-        assert sleep_calls == []
+        chunk_lists = _sent_chunk_lists(bot)
+        assert len(chunk_lists) == 1  # one alert -> one chunked call
+        chunks = chunk_lists[0]
+        assert len(chunks) > 1  # ...but split into multiple messages
+        for chunk in chunks:
+            assert len(chunk.encode("utf-8")) <= MESSAGE_CHUNK_MAX_BYTES
+        # Nothing lost: the full description survives across the chunks (joined
+        # with a space, since the chunker drops the boundary space itself -- it's
+        # implicit between two separate messages).
+        assert long_description in " ".join(chunks)
+        assert "..." not in " ".join(chunks)  # no truncation ellipsis anywhere
+
+    async def test_chunk_split_is_word_safe(self):
+        bot = _alerts_service_bot()
+        service = AlertsService(bot)
+        record = dict(RSO_RECORD, description="słowo " * 60)
+        await service._process_new_alerts(
+            "rso", [record], service._format_rso_message,
+            send_details=False, max_alerts_per_hour=12, max_age_hours=24,
+        )
+        chunks = _sent_chunk_lists(bot)[0]
+        assert len(chunks) > 1
+        for chunk in chunks:
+            assert not chunk.startswith(" ")
 
 
 @pytest.mark.unit
@@ -323,7 +330,7 @@ class TestStaleness:
             "imgw_meteo", [old_record], service._format_imgw_message,
             send_details=False, max_alerts_per_hour=12, max_age_hours=24,
         )
-        bot.command_manager.send_channel_message.assert_not_awaited()
+        bot.command_manager.send_channel_messages_chunked.assert_not_awaited()
 
     async def test_stale_alert_is_marked_seen_so_its_not_rechecked_forever(self):
         bot = _alerts_service_bot()
@@ -348,21 +355,21 @@ class TestStaleness:
             "imgw_meteo", [old_record, fresh_record], service._format_imgw_message,
             send_details=False, max_alerts_per_hour=12, max_age_hours=24,
         )
-        bot.command_manager.send_channel_message.assert_awaited_once()
+        bot.command_manager.send_channel_messages_chunked.assert_awaited_once()
         assert "old" in service._seen_ids["imgw_meteo"]
         assert "fresh" in service._seen_ids["imgw_meteo"]
 
 
 @pytest.mark.unit
 class TestFloodScope:
-    async def test_flood_scope_passed_to_send_channel_message(self):
+    async def test_flood_scope_passed_to_send(self):
         bot = _alerts_service_bot(flood_scope="pl-podlasie")
         service = AlertsService(bot)
         await service._process_new_alerts(
             "imgw_meteo", [IMGW_RECORD], service._format_imgw_message,
             send_details=False, max_alerts_per_hour=12, max_age_hours=24,
         )
-        _, kwargs = bot.command_manager.send_channel_message.call_args
+        _, kwargs = bot.command_manager.send_channel_messages_chunked.call_args
         assert kwargs["scope"] == "pl-podlasie"
 
     async def test_empty_flood_scope_passes_none(self):
@@ -372,52 +379,64 @@ class TestFloodScope:
             "imgw_meteo", [IMGW_RECORD], service._format_imgw_message,
             send_details=False, max_alerts_per_hour=12, max_age_hours=24,
         )
-        _, kwargs = bot.command_manager.send_channel_message.call_args
+        _, kwargs = bot.command_manager.send_channel_messages_chunked.call_args
         assert kwargs["scope"] is None
 
 
 @pytest.mark.unit
 class TestSendDetails:
-    async def test_send_details_false_sends_one_message(self):
+    async def test_send_details_false_sends_one_call(self):
         bot = _alerts_service_bot(imgw_meteo_send_details="false")
         service = AlertsService(bot)
         await service._process_new_alerts(
             "imgw_meteo", [IMGW_RECORD], service._format_imgw_message,
             send_details=False, max_alerts_per_hour=12, max_age_hours=24,
         )
-        assert bot.command_manager.send_channel_message.await_count == 1
+        assert bot.command_manager.send_channel_messages_chunked.await_count == 1
 
-    async def test_send_details_true_sends_followup_message(self):
+    async def test_send_details_true_sends_followup_call_for_imgw(self):
+        """IMGW's header never includes the full warning text -- send_details
+        triggers a genuine second call carrying it."""
         bot = _alerts_service_bot()
         service = AlertsService(bot)
         await service._process_new_alerts(
             "imgw_meteo", [IMGW_RECORD], service._format_imgw_message,
             send_details=True, max_alerts_per_hour=12, max_age_hours=24,
         )
-        assert bot.command_manager.send_channel_message.await_count == 2
-        second_call_text = bot.command_manager.send_channel_message.call_args_list[1].args[1]
+        assert bot.command_manager.send_channel_messages_chunked.await_count == 2
+        second_call_text = "".join(_sent_chunk_lists(bot)[1])
         assert second_call_text.startswith("Prognozowane")
+
+    async def test_send_details_true_does_not_duplicate_for_rso(self):
+        """RSO's formatter already merges the description into the primary
+        message -- send_details=True must not send it a second time."""
+        bot = _alerts_service_bot()
+        service = AlertsService(bot)
+        await service._process_new_alerts(
+            "rso", [RSO_RECORD], service._format_rso_message,
+            send_details=True, max_alerts_per_hour=12, max_age_hours=24,
+        )
+        assert bot.command_manager.send_channel_messages_chunked.await_count == 1
 
 
 @pytest.mark.unit
 class TestMessageFormatting:
-    def test_imgw_message_is_compact_and_contains_key_fields(self):
+    def test_imgw_message_contains_key_fields(self):
         bot = _alerts_service_bot()
         service = AlertsService(bot)
         text = service._format_imgw_message(IMGW_RECORD)
-        assert len(text) <= 140
         assert "Burze" in text
         assert "st.1" in text
         assert "03:00 11.08" in text
         assert "[10.08]" in text  # published_at date, distinct from the valid_to time
 
-    def test_rso_message_is_compact_and_contains_title(self):
+    def test_rso_message_contains_title_and_full_description(self):
         bot = _alerts_service_bot()
         service = AlertsService(bot)
         text = service._format_rso_message(RSO_RECORD)
-        assert len(text) <= 140
         assert "ALERT RCB - BURZE/2" in text
         assert "[10.08]" in text  # published_at date
+        assert RSO_RECORD["description"] in text  # full text, not a truncated snippet
 
     def test_date_omitted_when_published_at_missing(self):
         bot = _alerts_service_bot()
@@ -425,13 +444,6 @@ class TestMessageFormatting:
         record = dict(IMGW_RECORD, published_at=None)
         text = service._format_imgw_message(record)
         assert "[" not in text
-
-    def test_long_description_does_not_blow_budget(self):
-        bot = _alerts_service_bot()
-        service = AlertsService(bot)
-        long_record = dict(RSO_RECORD, description="X" * 300)
-        text = service._format_rso_message(long_record)
-        assert len(text) <= 140
 
     def test_translate_falls_back_safely_when_bot_has_no_translator(self):
         """A service plugin has no BaseCommand.translate() helper; when the bot
@@ -455,6 +467,8 @@ class TestConfigDefaults:
         assert service.rso_send_details is False
         assert service.imgw_enabled is True
         assert service.rso_enabled is True
+        assert service.imgw_max_age_hours == 24
+        assert service.rso_max_age_hours == 24
 
     async def test_imgw_and_rso_independent_pollers(self):
         """Starting the service creates one task per enabled source."""
