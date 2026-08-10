@@ -1482,6 +1482,14 @@
       "rso": {
         "prefix": "RSO alert"
       },
+      "gios": {
+        "prefix": "Air quality",
+        "normal_prefix": "Air quality back to normal"
+      },
+      "paa": {
+        "prefix": "Elevated radiation",
+        "normal_prefix": "Radiation back to normal"
+      },
       "until": "until {time}"
     }
   }

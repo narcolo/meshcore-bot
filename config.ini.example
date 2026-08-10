@@ -2264,6 +2264,55 @@ rso_max_alerts_per_hour = 12
 # Skip alerts published longer ago than this many hours (same stale-dedup-reset
 # guard as imgw_meteo_max_age_hours above)
 rso_max_age_hours = 24
+
+# --- GIOS air quality (Phase 2b) ---
+# Unlike IMGW/RSO (discrete events), this is a continuous measurement -- it alerts
+# on threshold crossing instead of "new item" dedup, with hysteresis so it doesn't
+# re-fire every poll while sitting above the line. Off by default.
+gios_enabled = false
+
+# Poll interval (seconds). Default: 900 (15 minutes) -- GIOS itself only updates
+# hourly, no need to poll as often as the event feeds.
+gios_poll_interval = 900
+
+# GIOS station to monitor. 11174 = ul. 42 Pulku Piechoty, Bialystok -- the only
+# Bialystok station with enough sensors (SO2/NO2/PM10/PM2.5/O3) to compute an
+# overall index; see plans/alert-feeds-research.md for the other stations found.
+gios_station_id = 11174
+
+# Alert when the AQI category reaches or exceeds this. Polish 6-level scale, worst
+# to best: Bardzo zły, Zły, Dostateczny, Umiarkowany, Dobry, Bardzo dobry.
+gios_alert_category = Zły
+
+# Minimum hours between repeat "still elevated" reminders while above threshold
+gios_renotify_hours = 6
+
+# --- PAA radiation monitoring (Phase 2b) ---
+# Same threshold-crossing/hysteresis shape as GIOS above, per station. Off by default.
+paa_enabled = false
+
+# Poll interval (seconds). Default: 3600 (1 hour) -- readings themselves are hourly.
+paa_poll_interval = 3600
+
+# Comma-separated PAA station names to monitor. Plain ASCII is fine -- matching is
+# diacritic- and case-insensitive (the real station names are "Białystok"/"Suwałki").
+# See plans/alert-feeds-research.md for the full list of Podlaskie-area stations.
+paa_stations = Bialystok,Suwalki,Siemiatycze
+
+# Alert threshold in uSv/h. NOT sourced from an official PAA public-alert standard --
+# no such published threshold was found during research (see research doc, PAA
+# notes). This is a placeholder several times above the ~0.06-0.08 uSv/h background
+# observed at Podlaskie stations during research; tune from real observed readings
+# before relying on it, don't treat it as an authoritative safety limit.
+paa_alert_dose_rate_usvh = 0.3
+
+# Skip a station reading older than this many hours rather than alerting on stale
+# data (Bialystok's own station was observed 6 days stale during research -- some
+# PAA stations lag badly)
+paa_max_reading_age_hours = 6
+
+# Minimum hours between repeat "still elevated" reminders while above threshold
+paa_renotify_hours = 6
 [Worldcup_Service]
 # Live FIFA World Cup score updates posted to a channel (true/false).
 # Posts proactive messages as matches progress, e.g.:

@@ -1,4 +1,5 @@
-"""Fetch + normalize functions for the Phase 2a alert sources (IMGW, RSO).
+"""Fetch + normalize functions for the alert sources (IMGW, RSO — Phase 2a; GIOS, PAA —
+Phase 2b).
 
 Synchronous (plain ``requests``), by design — callers run these in a thread executor
 (see ``AlertsService``), matching the pattern already used by
@@ -6,9 +7,14 @@ Synchronous (plain ``requests``), by design — callers run these in a thread ex
 
 See ``plans/alert-feeds-research.md`` for the source research this is built from, and
 ``poc_alerts/fetch_alerts_poc.py`` for the original proof-of-concept these functions were
-promoted from (IMGW fetch/normalize logic is carried over near-verbatim; RSO is new).
+promoted from (IMGW fetch/normalize logic is carried over near-verbatim; RSO, GIOS, PAA
+are new). GIOS/PAA return purpose-built measurement dicts, not the discrete-event
+``_normalize()`` shape IMGW/RSO use — they're continuous readings, not "new item"
+events, and are consumed by AlertsService's separate threshold/hysteresis logic.
 """
 
+import re
+import unicodedata
 from typing import Any, Optional
 
 import requests
@@ -26,6 +32,34 @@ IMGW_METEO_WARNINGS_URL = "https://danepubliczne.imgw.pl/api/data/warningsmeteo"
 # wojewodztwo slug in the path scopes results to Podlaskie server-side, so no
 # additional area filtering is needed on the response.
 RSO_PODLASKIE_URL = "http://komunikaty.tvp.pl/komunikaty/podlaskie/wszystkie?_format=json"
+
+GIOS_AQINDEX_URL = "https://api.gios.gov.pl/pjp-api/v1/rest/aqindex/getIndex/{station_id}"
+
+PAA_WFS_URL = "https://monitoring.paa.gov.pl/geoserver/paa/ows"
+# A plain non-browser User-Agent gets 403'd by an apparent WAF in front of the
+# GeoServer instance (see research doc "6. PAA radiation monitoring") -- no cookies,
+# auth, or other headers were needed, just a normal-looking UA string.
+PAA_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+)
+# Loose bounding box covering wojewodztwo podlaskie and its immediate neighbors --
+# wide enough that any plausibly-configured station name is included regardless of
+# its exact coordinates, while still avoiding a full-Poland (62-station) payload.
+PAA_PODLASKIE_BBOX = "21.5,52.0,24.5,54.5,EPSG:4326"
+
+_PAA_VALUE_RE = re.compile(r"^([\d.]+)\s*(\S+)$")
+
+# Polish ł/Ł don't decompose under NFKD (unlike ą/ć/ę/ń/ó/ś/ź/ż, which do), so a
+# plain "strip combining marks" pass alone won't turn "Białystok" into "bialystok".
+_POLISH_L_STROKE = str.maketrans("łŁ", "lL")
+
+
+def normalize_station_name(name: str) -> str:
+    """Diacritic- and case-insensitive comparison key, e.g. 'Białystok' ->
+    'bialystok', so config.ini can list station names in plain ASCII."""
+    decomposed = unicodedata.normalize("NFKD", name.translate(_POLISH_L_STROKE))
+    return "".join(c for c in decomposed if not unicodedata.combining(c)).strip().lower()
 
 
 def _normalize(
@@ -133,3 +167,76 @@ def fetch_rso_podlaskie() -> list[dict[str, Any]]:
             )
         )
     return records
+
+
+def fetch_gios_aqindex(station_id: int) -> Optional[dict[str, Any]]:
+    """Live GIOS overall air quality index for one station.
+
+    Returns None when the station doesn't have enough sensors to compute an
+    overall index ("Brak indeksu") -- callers should treat that as "unknown,"
+    not "elevated."
+
+    Raises requests.RequestException / ValueError on network/parse failure.
+    """
+    resp = requests.get(
+        GIOS_AQINDEX_URL.format(station_id=station_id),
+        headers={"User-Agent": USER_AGENT, "Accept": "application/ld+json"},
+        timeout=TIMEOUT,
+    )
+    resp.raise_for_status()
+    # The real payload is JSON-LD: fields live nested under an "AqIndex" key
+    # alongside an "@context" block, not at the top level (see research doc
+    # "Gotcha found while building the PoC").
+    data = resp.json().get("AqIndex") or {}
+    category = data.get("Nazwa kategorii indeksu")
+    if not category or category == "Brak indeksu":
+        return None
+    return {
+        "station_id": station_id,
+        "category": category,
+        "computed_at": data.get("Data wykonania obliczeń indeksu"),
+    }
+
+
+def fetch_paa_radiation(station_names: list[str]) -> list[dict[str, Any]]:
+    """Live PAA radiation dose-rate readings for the given station names.
+
+    Only stations whose "stacja" name case-insensitively matches one of
+    station_names are returned; a configured name absent from the response is
+    simply missing from the result (callers should log if that's unexpected).
+
+    Raises requests.RequestException / ValueError on network/parse failure.
+    """
+    wanted = {normalize_station_name(name) for name in station_names if name.strip()}
+    resp = requests.get(
+        PAA_WFS_URL,
+        params={
+            "service": "WFS",
+            "version": "2.0.0",
+            "request": "GetFeature",
+            "typeNames": "paa:kcad_siec_pms_moc_dawki_mapa",
+            "outputFormat": "application/json",
+            "bbox": PAA_PODLASKIE_BBOX,
+        },
+        headers={"User-Agent": PAA_USER_AGENT},
+        timeout=TIMEOUT,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+
+    readings = []
+    for feature in data.get("features", []):
+        props = feature.get("properties") or {}
+        name = (props.get("stacja") or "").strip()
+        if normalize_station_name(name) not in wanted:
+            continue
+        match = _PAA_VALUE_RE.match((props.get("tip_value") or "").strip())
+        if not match:
+            continue
+        readings.append({
+            "station": name,
+            "value": float(match.group(1)),
+            "unit": match.group(2),
+            "timestamp": props.get("tip_date"),
+        })
+    return readings
