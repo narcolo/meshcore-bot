@@ -1366,6 +1366,14 @@
       "rso": {
         "prefix": "Alert RSO"
       },
+      "gios": {
+        "prefix": "Jakość powietrza",
+        "normal_prefix": "Jakość powietrza wróciła do normy"
+      },
+      "paa": {
+        "prefix": "Podwyższone promieniowanie",
+        "normal_prefix": "Promieniowanie w normie"
+      },
       "until": "do {time}"
     }
   }

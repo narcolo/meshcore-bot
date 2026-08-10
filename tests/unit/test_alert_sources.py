@@ -1,4 +1,5 @@
-"""Unit tests for modules/clients/alert_sources.py (Phase 2a alert fetch/normalize).
+"""Unit tests for modules/clients/alert_sources.py (IMGW/RSO - Phase 2a; GIOS/PAA -
+Phase 2b fetch/normalize).
 
 Fixture payloads are trimmed real examples captured during the source research in
 plans/alert-feeds-research.md -- no network calls are made (requests.get is mocked).
@@ -172,3 +173,134 @@ class TestFetchRsoPodlaskie:
         ):
             records = alert_sources.fetch_rso_podlaskie()
         assert records[0]["area"] == "Podlaskie"
+
+
+GIOS_AQINDEX_RESPONSE = {
+    "@context": {"AqIndex": {"@id": "https://api.gios.gov.pl/pjp-api/v1/rest/aqindex/getIndex"}},
+    "AqIndex": {
+        "Identyfikator stacji pomiarowej": 11174,
+        "Data wykonania obliczeń indeksu": "2026-08-10 18:20:20",
+        "Wartość indeksu": 1,
+        "Nazwa kategorii indeksu": "Dobry",
+        "Wartość indeksu dla wskaźnika SO2": 0,
+        "Nazwa kategorii indeksu dla wskażnika SO2": "Bardzo dobry",
+    },
+}
+
+GIOS_NO_INDEX_RESPONSE = {
+    "AqIndex": {
+        "Identyfikator stacji pomiarowej": 609,
+        "Data wykonania obliczeń indeksu": "2026-08-10 17:20:18",
+        "Wartość indeksu": -1,
+        "Nazwa kategorii indeksu": "Brak indeksu",
+    },
+}
+
+PAA_WFS_RESPONSE = {
+    "type": "FeatureCollection",
+    "features": [
+        {
+            "type": "Feature",
+            "geometry": {"type": "Point", "coordinates": [23.08572, 53.16813]},
+            "properties": {
+                "id": "4210216f-e980-4aee-afb1-4c69beb1c6d9",
+                "stacja": "Białystok",
+                "color": "#1dadae",
+                "tip_value": "0.064 µSv/h",
+                "tip_name": "Białystok",
+                "tip_date": "2026-08-04 16:00",
+            },
+        },
+        {
+            "geometry": {"type": "Point", "coordinates": [22.948798, 54.130738]},
+            "properties": {"id": "f7", "stacja": "Suwałki", "tip_value": "0.084 µSv/h",
+                            "tip_date": "2026-08-10 20:00"},
+        },
+        {
+            "geometry": {"type": "Point", "coordinates": [22.88256, 52.40571]},
+            "properties": {"id": "4f", "stacja": "Siemiatycze", "tip_value": "0.068 µSv/h",
+                            "tip_date": "2026-08-10 20:00"},
+        },
+        {
+            "geometry": {"type": "Point", "coordinates": [21.0, 52.0]},
+            "properties": {"id": "aa", "stacja": "Warszawa", "tip_value": "0.070 µSv/h",
+                            "tip_date": "2026-08-10 20:00"},
+        },
+    ],
+}
+
+
+@pytest.mark.unit
+class TestFetchGiosAqindex:
+    def test_normalizes_category_and_timestamp(self):
+        with patch(
+            "modules.clients.alert_sources.requests.get",
+            return_value=_mock_response(GIOS_AQINDEX_RESPONSE),
+        ):
+            result = alert_sources.fetch_gios_aqindex(11174)
+        assert result == {
+            "station_id": 11174,
+            "category": "Dobry",
+            "computed_at": "2026-08-10 18:20:20",
+        }
+
+    def test_returns_none_when_no_index_computed(self):
+        """A station without enough sensors reports 'Brak indeksu' -- treat as
+        unknown, not as an alertable category."""
+        with patch(
+            "modules.clients.alert_sources.requests.get",
+            return_value=_mock_response(GIOS_NO_INDEX_RESPONSE),
+        ):
+            result = alert_sources.fetch_gios_aqindex(609)
+        assert result is None
+
+    def test_sends_json_ld_accept_header(self):
+        """406 Not Acceptable without this header (see research doc gotcha)."""
+        with patch(
+            "modules.clients.alert_sources.requests.get",
+            return_value=_mock_response(GIOS_AQINDEX_RESPONSE),
+        ) as mock_get:
+            alert_sources.fetch_gios_aqindex(11174)
+        assert mock_get.call_args.kwargs["headers"]["Accept"] == "application/ld+json"
+
+
+@pytest.mark.unit
+class TestFetchPaaRadiation:
+    def test_filters_to_requested_stations_only(self):
+        with patch(
+            "modules.clients.alert_sources.requests.get",
+            return_value=_mock_response(PAA_WFS_RESPONSE),
+        ):
+            readings = alert_sources.fetch_paa_radiation(["Bialystok", "Siemiatycze"])
+        stations = {r["station"] for r in readings}
+        assert stations == {"Białystok", "Siemiatycze"}  # "Warszawa" excluded
+
+    def test_diacritic_and_case_insensitive_matching(self):
+        """Config is plain ASCII ('Bialystok', 'Suwalki'); real station names carry
+        Polish diacritics ('Białystok', 'Suwałki') -- must match anyway."""
+        with patch(
+            "modules.clients.alert_sources.requests.get",
+            return_value=_mock_response(PAA_WFS_RESPONSE),
+        ):
+            readings = alert_sources.fetch_paa_radiation(["bialystok", "SUWALKI"])
+        stations = {r["station"] for r in readings}
+        assert stations == {"Białystok", "Suwałki"}
+
+    def test_parses_value_and_unit_from_combined_string(self):
+        with patch(
+            "modules.clients.alert_sources.requests.get",
+            return_value=_mock_response(PAA_WFS_RESPONSE),
+        ):
+            readings = alert_sources.fetch_paa_radiation(["Suwalki"])
+        assert readings == [{
+            "station": "Suwałki", "value": 0.084, "unit": "µSv/h",
+            "timestamp": "2026-08-10 20:00",
+        }]
+
+    def test_unmatched_station_is_simply_absent(self):
+        with patch(
+            "modules.clients.alert_sources.requests.get",
+            return_value=_mock_response(PAA_WFS_RESPONSE),
+        ):
+            readings = alert_sources.fetch_paa_radiation(["Nonexistent Station"])
+        assert readings == []

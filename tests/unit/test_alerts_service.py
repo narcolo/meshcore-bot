@@ -1,15 +1,22 @@
-"""Unit tests for AlertsService (Phase 2a: IMGW meteo warnings + RSO).
+"""Unit tests for AlertsService.
 
-Covers dedup, restart-safety (bot_metadata-backed seen-id persistence), the
-per-source alerts/hour cap, staleness filtering, multi-message chunking of long
-alerts, flood_scope threading, and message formatting. No network calls --
-alert_sources fetch functions are mocked at the call site.
+Phase 2a (IMGW meteo warnings + RSO): dedup, restart-safety (bot_metadata-backed
+seen-id persistence), the per-source alerts/hour cap, staleness filtering,
+multi-message chunking of long alerts, flood_scope threading, and message
+formatting.
+
+Phase 2b (GIOS air quality + PAA radiation): threshold-crossing with hysteresis
+(_apply_threshold_state) instead of event dedup -- alert on crossing up, stay
+silent while still elevated (until the renotify interval), alert once on
+crossing back down.
+
+No network calls -- alert_sources fetch functions are mocked at the call site.
 """
 
 import configparser
 import json
 from datetime import datetime, timedelta
-from unittest.mock import AsyncMock, MagicMock, Mock
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 
@@ -17,7 +24,9 @@ from modules.command_manager import CommandManager
 from modules.i18n import Translator
 from modules.service_plugins.alerts_service import (
     MESSAGE_CHUNK_MAX_BYTES,
+    METADATA_KEY_GIOS_STATE,
     METADATA_KEY_IMGW_SEEN,
+    METADATA_KEY_PAA_STATE,
     METADATA_KEY_RSO_SEEN,
     AlertsService,
 )
@@ -48,6 +57,16 @@ RSO_RECORD = {
     "valid_from": "2026-08-10 13:58:00",
     "valid_to": "2026-08-11 04:00:00",
     "url": None,
+}
+
+GIOS_GOOD_READING = {"station_id": 11174, "category": "Bardzo dobry", "computed_at": "2026-08-10 18:20:20"}
+GIOS_BAD_READING = {"station_id": 11174, "category": "Bardzo zły", "computed_at": "2026-08-10 18:20:20"}
+
+PAA_FRESH_READING = {
+    "station": "Suwałki", "value": 0.084, "unit": "µSv/h", "timestamp": "2026-08-10 20:00"
+}
+PAA_STALE_READING = {
+    "station": "Białystok", "value": 0.064, "unit": "µSv/h", "timestamp": "2026-08-04 16:00"
 }
 
 
@@ -455,6 +474,240 @@ class TestMessageFormatting:
         assert "Burze" in text  # still produces a usable message, just untranslated
 
 
+def _fresh_paa_timestamp(minutes_ago: float = 5) -> str:
+    return (datetime.now() - timedelta(minutes=minutes_ago)).strftime("%Y-%m-%d %H:%M")
+
+
+@pytest.mark.unit
+class TestGiosThreshold:
+    """Threshold-crossing with hysteresis, not event dedup -- see
+    AlertsService._apply_threshold_state."""
+
+    async def test_no_alert_when_below_threshold(self):
+        bot = _alerts_service_bot(gios_alert_category="Zły")
+        service = AlertsService(bot)
+        with patch(
+            "modules.service_plugins.alerts_service.alert_sources.fetch_gios_aqindex",
+            return_value=GIOS_GOOD_READING,
+        ):
+            await service._check_gios()
+        bot.command_manager.send_channel_messages_chunked.assert_not_awaited()
+
+    async def test_alert_when_at_or_above_threshold(self):
+        bot = _alerts_service_bot(gios_alert_category="Zły")
+        service = AlertsService(bot)
+        with patch(
+            "modules.service_plugins.alerts_service.alert_sources.fetch_gios_aqindex",
+            return_value=GIOS_BAD_READING,
+        ):
+            await service._check_gios()
+        bot.command_manager.send_channel_messages_chunked.assert_awaited_once()
+        chunks = _sent_chunk_lists(bot)[0]
+        assert "Bardzo zły" in "".join(chunks)
+
+    async def test_no_repeat_alert_before_renotify_interval(self):
+        bot = _alerts_service_bot(gios_alert_category="Zły", gios_renotify_hours="6")
+        service = AlertsService(bot)
+        with patch(
+            "modules.service_plugins.alerts_service.alert_sources.fetch_gios_aqindex",
+            return_value=GIOS_BAD_READING,
+        ):
+            await service._check_gios()  # crosses into elevated -> alerts
+            bot.command_manager.send_channel_messages_chunked.reset_mock()
+            await service._check_gios()  # still elevated, renotify not due -> silent
+        bot.command_manager.send_channel_messages_chunked.assert_not_awaited()
+
+    async def test_repeat_alert_after_renotify_interval_elapses(self):
+        bot = _alerts_service_bot(gios_alert_category="Zły", gios_renotify_hours="6")
+        service = AlertsService(bot)
+        with patch(
+            "modules.service_plugins.alerts_service.alert_sources.fetch_gios_aqindex",
+            return_value=GIOS_BAD_READING,
+        ):
+            await service._check_gios()
+            # Backdate the last notification past the renotify window.
+            service._gios_state["11174"]["last_notified_at"] = (
+                datetime.now() - timedelta(hours=7)
+            ).isoformat()
+            bot.command_manager.send_channel_messages_chunked.reset_mock()
+            await service._check_gios()
+        bot.command_manager.send_channel_messages_chunked.assert_awaited_once()
+
+    async def test_back_to_normal_message_on_recovery(self):
+        bot = _alerts_service_bot(gios_alert_category="Zły")
+        service = AlertsService(bot)
+        service._gios_state["11174"] = {"state": "elevated", "last_notified_at": None}
+        with patch(
+            "modules.service_plugins.alerts_service.alert_sources.fetch_gios_aqindex",
+            return_value=GIOS_GOOD_READING,
+        ):
+            await service._check_gios()
+        bot.command_manager.send_channel_messages_chunked.assert_awaited_once()
+        assert service._gios_state["11174"]["state"] == "normal"
+        chunks = _sent_chunk_lists(bot)[0]
+        assert "Bardzo dobry" in "".join(chunks)
+
+    async def test_no_computable_index_leaves_state_untouched(self):
+        """'Brak indeksu' (fetch returns None) -- don't guess either way."""
+        bot = _alerts_service_bot(gios_alert_category="Zły")
+        service = AlertsService(bot)
+        service._gios_state["11174"] = {"state": "elevated", "last_notified_at": "x"}
+        with patch(
+            "modules.service_plugins.alerts_service.alert_sources.fetch_gios_aqindex",
+            return_value=None,
+        ):
+            await service._check_gios()
+        bot.command_manager.send_channel_messages_chunked.assert_not_awaited()
+        assert service._gios_state["11174"]["state"] == "elevated"  # unchanged
+
+    async def test_unrecognized_category_is_skipped_safely(self):
+        bot = _alerts_service_bot()
+        service = AlertsService(bot)
+        with patch(
+            "modules.service_plugins.alerts_service.alert_sources.fetch_gios_aqindex",
+            return_value={"station_id": 11174, "category": "???", "computed_at": "x"},
+        ):
+            await service._check_gios()  # must not raise
+        bot.command_manager.send_channel_messages_chunked.assert_not_awaited()
+
+
+@pytest.mark.unit
+class TestPaaThreshold:
+    async def test_alert_when_above_threshold(self):
+        bot = _alerts_service_bot(paa_stations="Suwalki", paa_alert_dose_rate_usvh="0.01")
+        service = AlertsService(bot)
+        reading = dict(PAA_FRESH_READING, timestamp=_fresh_paa_timestamp())
+        with patch(
+            "modules.service_plugins.alerts_service.alert_sources.fetch_paa_radiation",
+            return_value=[reading],
+        ):
+            await service._check_paa()
+        bot.command_manager.send_channel_messages_chunked.assert_awaited_once()
+        chunks = _sent_chunk_lists(bot)[0]
+        assert "Suwałki" in "".join(chunks)
+
+    async def test_no_alert_when_below_threshold(self):
+        bot = _alerts_service_bot(paa_stations="Suwalki", paa_alert_dose_rate_usvh="0.3")
+        service = AlertsService(bot)
+        reading = dict(PAA_FRESH_READING, timestamp=_fresh_paa_timestamp())
+        with patch(
+            "modules.service_plugins.alerts_service.alert_sources.fetch_paa_radiation",
+            return_value=[reading],
+        ):
+            await service._check_paa()
+        bot.command_manager.send_channel_messages_chunked.assert_not_awaited()
+
+    async def test_stale_reading_is_skipped(self):
+        bot = _alerts_service_bot(
+            paa_stations="Bialystok", paa_alert_dose_rate_usvh="0.01", paa_max_reading_age_hours="6"
+        )
+        service = AlertsService(bot)
+        with patch(
+            "modules.service_plugins.alerts_service.alert_sources.fetch_paa_radiation",
+            return_value=[PAA_STALE_READING],  # 6 days old
+        ):
+            await service._check_paa()
+        bot.command_manager.send_channel_messages_chunked.assert_not_awaited()
+
+    async def test_multiple_stations_have_independent_state(self):
+        bot = _alerts_service_bot(
+            paa_stations="Suwalki,Siemiatycze", paa_alert_dose_rate_usvh="0.07"
+        )
+        service = AlertsService(bot)
+        readings = [
+            dict(PAA_FRESH_READING, station="Suwałki", value=0.084,
+                 timestamp=_fresh_paa_timestamp()),  # above threshold
+            dict(PAA_FRESH_READING, station="Siemiatycze", value=0.068,
+                 timestamp=_fresh_paa_timestamp()),  # below threshold
+        ]
+        with patch(
+            "modules.service_plugins.alerts_service.alert_sources.fetch_paa_radiation",
+            return_value=readings,
+        ):
+            await service._check_paa()
+        assert bot.command_manager.send_channel_messages_chunked.await_count == 1
+        sent_text = "".join(_sent_chunk_lists(bot)[0])
+        assert "Suwałki" in sent_text
+        assert service._paa_state["Suwałki"]["state"] == "elevated"
+        assert service._paa_state["Siemiatycze"]["state"] == "normal"
+
+    async def test_missing_configured_station_logs_warning_without_crashing(self):
+        bot = _alerts_service_bot(paa_stations="Nonexistent Station")
+        service = AlertsService(bot)
+        with patch(
+            "modules.service_plugins.alerts_service.alert_sources.fetch_paa_radiation",
+            return_value=[],
+        ):
+            await service._check_paa()  # must not raise
+        bot.command_manager.send_channel_messages_chunked.assert_not_awaited()
+        bot.logger.warning.assert_called()
+
+    async def test_back_to_normal_message_on_recovery(self):
+        bot = _alerts_service_bot(paa_stations="Suwalki", paa_alert_dose_rate_usvh="0.3")
+        service = AlertsService(bot)
+        service._paa_state["Suwałki"] = {"state": "elevated", "last_notified_at": None}
+        reading = dict(PAA_FRESH_READING, timestamp=_fresh_paa_timestamp())  # 0.084, below 0.3
+        with patch(
+            "modules.service_plugins.alerts_service.alert_sources.fetch_paa_radiation",
+            return_value=[reading],
+        ):
+            await service._check_paa()
+        bot.command_manager.send_channel_messages_chunked.assert_awaited_once()
+        assert service._paa_state["Suwałki"]["state"] == "normal"
+
+
+@pytest.mark.unit
+class TestThresholdStatePersistence:
+    async def test_gios_state_persisted_after_transition(self):
+        db_manager = _FakeDBManager()
+        bot = _alerts_service_bot(db_manager=db_manager, gios_alert_category="Zły")
+        service = AlertsService(bot)
+        with patch(
+            "modules.service_plugins.alerts_service.alert_sources.fetch_gios_aqindex",
+            return_value=GIOS_BAD_READING,
+        ):
+            await service._check_gios()
+        persisted = json.loads(db_manager.get_metadata(METADATA_KEY_GIOS_STATE))
+        assert persisted["11174"]["state"] == "elevated"
+
+    async def test_gios_state_survives_restart(self):
+        """A fresh AlertsService sharing the same db_manager must not re-alert for
+        a station that's already in the elevated state."""
+        db_manager = _FakeDBManager()
+        bot = _alerts_service_bot(db_manager=db_manager, gios_alert_category="Zły")
+        service = AlertsService(bot)
+        with patch(
+            "modules.service_plugins.alerts_service.alert_sources.fetch_gios_aqindex",
+            return_value=GIOS_BAD_READING,
+        ):
+            await service._check_gios()
+
+        bot2 = _alerts_service_bot(db_manager=db_manager, gios_alert_category="Zły")
+        service2 = AlertsService(bot2)
+        assert service2._gios_state["11174"]["state"] == "elevated"
+        with patch(
+            "modules.service_plugins.alerts_service.alert_sources.fetch_gios_aqindex",
+            return_value=GIOS_BAD_READING,
+        ):
+            await service2._check_gios()
+        bot2.command_manager.send_channel_messages_chunked.assert_not_awaited()
+
+    async def test_paa_state_persisted_per_station(self):
+        db_manager = _FakeDBManager()
+        bot = _alerts_service_bot(
+            db_manager=db_manager, paa_stations="Suwalki", paa_alert_dose_rate_usvh="0.01"
+        )
+        service = AlertsService(bot)
+        reading = dict(PAA_FRESH_READING, timestamp=_fresh_paa_timestamp())
+        with patch(
+            "modules.service_plugins.alerts_service.alert_sources.fetch_paa_radiation",
+            return_value=[reading],
+        ):
+            await service._check_paa()
+        persisted = json.loads(db_manager.get_metadata(METADATA_KEY_PAA_STATE))
+        assert persisted["Suwałki"]["state"] == "elevated"
+
+
 @pytest.mark.unit
 class TestConfigDefaults:
     def test_defaults_match_spec(self):
@@ -469,6 +722,18 @@ class TestConfigDefaults:
         assert service.rso_enabled is True
         assert service.imgw_max_age_hours == 24
         assert service.rso_max_age_hours == 24
+        # GIOS/PAA (Phase 2b) default off -- opt-in, unlike IMGW/RSO
+        assert service.gios_enabled is False
+        assert service.paa_enabled is False
+        assert service.gios_poll_interval == 900
+        assert service.paa_poll_interval == 3600
+        assert service.gios_station_id == 11174
+        assert service.gios_alert_category == "Zły"
+        assert service.gios_renotify_hours == 6.0
+        assert service.paa_stations == ["Bialystok", "Suwalki", "Siemiatycze"]
+        assert service.paa_alert_dose_rate_usvh == 0.3
+        assert service.paa_max_reading_age_hours == 6.0
+        assert service.paa_renotify_hours == 6.0
 
     async def test_imgw_and_rso_independent_pollers(self):
         """Starting the service creates one task per enabled source."""
@@ -477,5 +742,14 @@ class TestConfigDefaults:
         await service.start()
         try:
             assert len(service._tasks) == 2
+        finally:
+            await service.stop()
+
+    async def test_all_four_sources_independent_pollers_when_enabled(self):
+        bot = _alerts_service_bot(gios_enabled="true", paa_enabled="true")
+        service = AlertsService(bot)
+        await service.start()
+        try:
+            assert len(service._tasks) == 4
         finally:
             await service.stop()
