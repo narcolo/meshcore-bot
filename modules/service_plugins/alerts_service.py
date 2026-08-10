@@ -275,46 +275,81 @@ class AlertsService(BaseServicePlugin):
 
         sent_count = 0
         suppressed_count = 0
-        for record in new_records:
+        failed_count = 0
+        for i, record in enumerate(new_records):
             external_id = record["external_id"]
-            # Mark as seen regardless of whether the rate cap allows sending it now --
-            # this is a hard per-hour ceiling (log-and-drop), not a deferred queue, so
-            # a suppressed alert is not retried once the cap resets next poll.
-            self._mark_seen(source, external_id)
 
             if not self._check_rate_limit(source, max_alerts_per_hour):
+                # Hard per-hour ceiling (log-and-drop), not a deferred queue -- mark
+                # seen so a suppressed alert is not retried once the cap resets.
+                self._mark_seen(source, external_id)
                 suppressed_count += 1
                 continue
 
+            if i > 0:
+                # Pace sends to the bot's own global TX rate limit ([Bot]
+                # rate_limit_seconds) so a burst of several new alerts (e.g. a
+                # first-run backfill) doesn't collide with it -- send_channel_message
+                # returns False rather than queuing/retrying when rate limited, so
+                # without pacing everything past the first message would be dropped.
+                await asyncio.sleep(self._send_pace_seconds())
+
             try:
-                await self._send_alert(record, formatter, send_details)
-                sent_count += 1
-                self._sent_timestamps[source].append(datetime.now().timestamp())
+                sent = await self._send_alert(record, formatter, send_details)
             except Exception as e:
                 self.logger.error(
                     "Error sending %s alert %s: %s", source, external_id, e
                 )
+                sent = False
+
+            if sent:
+                self._mark_seen(source, external_id)
+                sent_count += 1
+                self._sent_timestamps[source].append(datetime.now().timestamp())
+            else:
+                # Transient failure (e.g. bot-level rate limit contention with
+                # unrelated traffic) -- deliberately NOT marked seen, so this alert
+                # is retried on the next poll instead of being silently lost.
+                failed_count += 1
 
         if suppressed_count:
             self.logger.warning(
                 "%s: %d alert(s) suppressed this poll (over %d/hour cap)",
                 source, suppressed_count, max_alerts_per_hour,
             )
+        if failed_count:
+            self.logger.warning(
+                "%s: %d alert(s) failed to send this poll, will retry next poll",
+                source, failed_count,
+            )
         if sent_count:
             self.logger.info("%s: sent %d new alert(s)", source, sent_count)
 
         self._persist_seen_ids(source)
+
+    def _send_pace_seconds(self) -> float:
+        """Delay between successive sends within one poll, paced to the bot's own
+        global TX rate limit (plus a small margin) so a burst of new alerts doesn't
+        collide with it and get silently dropped."""
+        try:
+            configured = self.bot.config.getfloat("Bot", "rate_limit_seconds", fallback=2.0)
+        except (ValueError, TypeError):
+            configured = 2.0
+        return configured + 0.3
 
     async def _send_alert(
         self,
         record: dict[str, Any],
         formatter: Callable[[dict[str, Any]], str],
         send_details: bool,
-    ) -> None:
+    ) -> bool:
+        """Returns True only if the primary compact message actually sent."""
         text = formatter(record)
-        await self.bot.command_manager.send_channel_message(
+        sent = await self.bot.command_manager.send_channel_message(
             self.channel, text, scope=self.get_mesh_flood_scope()
         )
+        if not sent:
+            return False
         if send_details:
             description = record.get("description")
             if description:
@@ -323,6 +358,7 @@ class AlertsService(BaseServicePlugin):
                     truncate_string(description, COMPACT_MESSAGE_MAX_LEN),
                     scope=self.get_mesh_flood_scope(),
                 )
+        return True
 
     def _check_rate_limit(self, source: str, max_per_hour: int) -> bool:
         """True if another alert may be sent for this source right now."""

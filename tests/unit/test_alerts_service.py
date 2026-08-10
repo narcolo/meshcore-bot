@@ -167,6 +167,120 @@ class TestRateLimit:
 
 
 @pytest.mark.unit
+class TestSendFailureNotLost:
+    """Regression coverage for a real bug caught in production: a burst of new
+    alerts collided with the bot's own global TX rate limiter
+    (send_channel_message returning False), and the old code counted/marked
+    every one of them as sent regardless -- 10 of 11 first-run alerts were
+    silently lost. A failed send must not be marked seen, so it is retried."""
+
+    async def test_failed_send_is_not_marked_seen(self):
+        bot = _alerts_service_bot()
+        bot.command_manager.send_channel_message = AsyncMock(return_value=False)
+        service = AlertsService(bot)
+        await service._process_new_alerts(
+            "imgw_meteo", [IMGW_RECORD], service._format_imgw_message,
+            send_details=False, max_alerts_per_hour=12,
+        )
+        assert IMGW_RECORD["external_id"] not in service._seen_ids["imgw_meteo"]
+
+    async def test_failed_send_is_retried_on_next_poll(self):
+        bot = _alerts_service_bot()
+        # Fails the first time, succeeds the second (simulates the rate limiter
+        # clearing by the next poll).
+        bot.command_manager.send_channel_message = AsyncMock(side_effect=[False, True])
+        service = AlertsService(bot)
+
+        await service._process_new_alerts(
+            "imgw_meteo", [IMGW_RECORD], service._format_imgw_message,
+            send_details=False, max_alerts_per_hour=12,
+        )
+        await service._process_new_alerts(
+            "imgw_meteo", [IMGW_RECORD], service._format_imgw_message,
+            send_details=False, max_alerts_per_hour=12,
+        )
+        assert bot.command_manager.send_channel_message.await_count == 2
+        assert IMGW_RECORD["external_id"] in service._seen_ids["imgw_meteo"]
+
+    async def test_send_details_followup_skipped_when_primary_send_fails(self):
+        bot = _alerts_service_bot()
+        bot.command_manager.send_channel_message = AsyncMock(return_value=False)
+        service = AlertsService(bot)
+        await service._process_new_alerts(
+            "imgw_meteo", [IMGW_RECORD], service._format_imgw_message,
+            send_details=True, max_alerts_per_hour=12,
+        )
+        # Only the one (failed) primary-message attempt -- no follow-up detail send.
+        assert bot.command_manager.send_channel_message.await_count == 1
+
+
+@pytest.mark.unit
+class TestSendPacing:
+    """A burst of several new alerts in one poll must be paced to the bot's own
+    global TX rate limit, not fired back-to-back (which is exactly what caused
+    the send-failure bug above in the first place)."""
+
+    async def test_sleeps_between_sends_using_configured_rate_limit(self, monkeypatch):
+        bot = _alerts_service_bot()
+        bot.config.add_section("Bot")
+        bot.config.set("Bot", "rate_limit_seconds", "3")
+        service = AlertsService(bot)
+
+        sleep_calls = []
+
+        async def fake_sleep(seconds):
+            sleep_calls.append(seconds)
+
+        monkeypatch.setattr(
+            "modules.service_plugins.alerts_service.asyncio.sleep", fake_sleep
+        )
+
+        record_2 = dict(RSO_RECORD, external_id="second", published_at="2026-08-10 15:00:00")
+        await service._process_new_alerts(
+            "rso", [RSO_RECORD, record_2], service._format_rso_message,
+            send_details=False, max_alerts_per_hour=12,
+        )
+        assert sleep_calls == [3.3]  # configured 3s + 0.3s margin, once (before 2nd send)
+
+    async def test_no_sleep_for_a_single_alert(self, monkeypatch):
+        bot = _alerts_service_bot()
+        service = AlertsService(bot)
+
+        async def fail_if_called(seconds):
+            raise AssertionError("should not sleep when only one alert is sent")
+
+        monkeypatch.setattr(
+            "modules.service_plugins.alerts_service.asyncio.sleep", fail_if_called
+        )
+        await service._process_new_alerts(
+            "imgw_meteo", [IMGW_RECORD], service._format_imgw_message,
+            send_details=False, max_alerts_per_hour=12,
+        )
+        bot.command_manager.send_channel_message.assert_awaited_once()
+
+    async def test_rate_capped_alert_does_not_consume_a_pacing_sleep(self, monkeypatch):
+        """Suppressed-by-cap alerts hit `continue` before the pacing sleep --
+        only real send attempts after the first should pace."""
+        bot = _alerts_service_bot()
+        service = AlertsService(bot)
+
+        sleep_calls = []
+
+        async def fake_sleep(seconds):
+            sleep_calls.append(seconds)
+
+        monkeypatch.setattr(
+            "modules.service_plugins.alerts_service.asyncio.sleep", fake_sleep
+        )
+        record_2 = dict(IMGW_RECORD, external_id="second", published_at="2026-08-10 07:00:00")
+        await service._process_new_alerts(
+            "imgw_meteo", [IMGW_RECORD, record_2], service._format_imgw_message,
+            send_details=False, max_alerts_per_hour=1,  # only 1 allowed -> 2nd is capped, not sent
+        )
+        assert sleep_calls == []
+
+
+@pytest.mark.unit
 class TestFloodScope:
     async def test_flood_scope_passed_to_send_channel_message(self):
         bot = _alerts_service_bot(flood_scope="pl-podlasie")
