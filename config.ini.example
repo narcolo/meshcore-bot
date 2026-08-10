@@ -2288,31 +2288,34 @@ gios_alert_category = Zły
 gios_renotify_hours = 6
 
 # --- PAA radiation monitoring (Phase 2b) ---
-# Same threshold-crossing/hysteresis shape as GIOS above, per station. Off by default.
+# Unlike GIOS above (threshold-crossing), this is a scheduled digest: at each
+# paa_schedule_times, pushes ONE combined message with every configured station's
+# current reading, unconditionally -- not gated by the warning threshold below. Off
+# by default.
 paa_enabled = false
 
-# Poll interval (seconds). Default: 3600 (1 hour) -- readings themselves are hourly.
-paa_poll_interval = 3600
+# Comma-separated daily times (24h HH:MM, local time) to push the digest.
+# Default: twice a day, 06:00 and 18:00.
+paa_schedule_times = 06:00,18:00
 
-# Comma-separated PAA station names to monitor. Plain ASCII is fine -- matching is
-# diacritic- and case-insensitive (the real station names are "Białystok"/"Suwałki").
-# See plans/alert-feeds-research.md for the full list of Podlaskie-area stations.
+# Comma-separated PAA station names to include in the digest, in this order. Plain
+# ASCII is fine -- matching is diacritic- and case-insensitive (the real station
+# names are "Białystok"/"Suwałki"). See plans/alert-feeds-research.md for the full
+# list of Podlaskie-area stations.
 paa_stations = Bialystok,Suwalki,Siemiatycze
 
-# Alert threshold in uSv/h. NOT sourced from an official PAA public-alert standard --
-# no such published threshold was found during research (see research doc, PAA
-# notes). This is a placeholder several times above the ~0.06-0.08 uSv/h background
-# observed at Podlaskie stations during research; tune from real observed readings
-# before relying on it, don't treat it as an authoritative safety limit.
+# Purely cosmetic: a station at or above this gets a warning marker in the digest.
+# NOT sourced from an official PAA public-alert standard -- no such published
+# threshold was found during research (see research doc, PAA notes). This is a
+# placeholder several times above the ~0.06-0.08 uSv/h background observed at
+# Podlaskie stations during research; tune from real observed readings, don't treat
+# it as an authoritative safety limit.
 paa_alert_dose_rate_usvh = 0.3
 
-# Skip a station reading older than this many hours rather than alerting on stale
-# data (Bialystok's own station was observed 6 days stale during research -- some
-# PAA stations lag badly)
+# Show a station as "no data" in the digest rather than an actually-stale reading,
+# for a station older than this many hours (Bialystok's own station was observed 6
+# days stale during research -- some PAA stations lag badly)
 paa_max_reading_age_hours = 6
-
-# Minimum hours between repeat "still elevated" reminders while above threshold
-paa_renotify_hours = 6
 [Worldcup_Service]
 # Live FIFA World Cup score updates posted to a channel (true/false).
 # Posts proactive messages as matches progress, e.g.:

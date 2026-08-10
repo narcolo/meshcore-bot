@@ -11,15 +11,18 @@ Sources (see plans/alert-feeds-research.md and plans/phase2-alert-integration-pl
 - RSO (Regionalny System Ostrzegania) for wojewodztwo podlaskie, which also carries
   republished Alert RCB messages
 - GIOS air quality index for a configured station (threshold-crossing alert, Phase 2b)
-- PAA radiation dose-rate readings for configured stations (threshold-crossing alert,
+- PAA radiation dose-rate readings for configured stations (fixed-time daily digest,
   Phase 2b)
 
-Two different alerting shapes live in this one service:
+Three different push shapes live in this one service:
 - IMGW/RSO are discrete *events* with stable ids -- "is this new?" dedup (see
-  _process_new_alerts).
-- GIOS/PAA are continuous *measurements* with no natural "new item" -- they alert on
-  threshold crossing instead, with hysteresis so they don't re-fire every poll while
-  sitting above the line (see _apply_threshold_state).
+  _process_new_alerts), polled on a fixed interval.
+- GIOS is a continuous *measurement* with no natural "new item" -- it alerts on
+  threshold crossing instead, with hysteresis so it doesn't re-fire every poll while
+  sitting above the line (see _apply_threshold_state), also on a fixed interval.
+- PAA is a *scheduled digest*: fetches all configured stations and pushes one combined
+  message at fixed times of day (default 06:00/18:00), always, regardless of readings
+  (see _daily_schedule_loop) -- not an interval, and not threshold-gated.
 
 Poll loops run one per source, all independent, so a slow or failing source never
 delays or blocks the others -- IMGW/RSO's loop is a near-direct port of
@@ -31,7 +34,7 @@ import asyncio
 import contextlib
 import json
 from collections import deque
-from datetime import datetime
+from datetime import datetime, time, timedelta
 from typing import Any, Callable, Coroutine, Optional
 
 import requests
@@ -56,11 +59,15 @@ SEEN_IDS_MAX = 200
 METADATA_KEY_IMGW_SEEN = "alerts_imgw_meteo_seen_ids"
 METADATA_KEY_RSO_SEEN = "alerts_rso_seen_ids"
 
-# Threshold-crossing state for GIOS/PAA (bot_metadata, JSON dict) -- see
+# Threshold-crossing state for GIOS (bot_metadata, JSON dict) -- see
 # _apply_threshold_state. Keyed by station (GIOS only has the one configured
-# station, but stored the same shape as PAA's per-station dict for consistency).
+# station, but stored dict-shaped for consistency/future multi-station support).
 METADATA_KEY_GIOS_STATE = "alerts_gios_threshold_state"
-METADATA_KEY_PAA_STATE = "alerts_paa_threshold_state"
+
+# Last daily-schedule slot PAA successfully fired for (bot_metadata, plain ISO
+# datetime string) -- see _daily_schedule_loop. Restart-safe: a bot restart within
+# the same slot must not re-send the digest.
+METADATA_KEY_PAA_LAST_SLOT = "alerts_paa_last_slot"
 
 # Polish 6-level AQI scale, worst to best is the opposite of this list -- higher
 # rank = worse air. "Brak indeksu" (no index computed) is deliberately absent:
@@ -127,26 +134,26 @@ class AlertsService(BaseServicePlugin):
          "min": 1, "default": 6, "unit": "h",
          "help": "Minimum hours between repeat reminders while still above threshold."},
         {"key": "paa_enabled", "label": "PAA radiation monitoring enabled", "type": "bool", "default": False,
-         "help": "Poll PAA radiation dose-rate readings for paa_stations."},
-        {"key": "paa_poll_interval", "label": "PAA poll interval", "type": "int",
-         "min": 60, "default": 3600, "unit": "s", "help": "How often to poll PAA."},
+         "help": "Push a combined PAA radiation digest for paa_stations at paa_schedule_times."},
+        {"key": "paa_schedule_times", "label": "PAA schedule (HH:MM,HH:MM)", "type": "str",
+         "default": "06:00,18:00",
+         "help": "Comma-separated daily times (24h HH:MM, local time) to push the digest. "
+                 "Always sent at each time, regardless of readings -- not threshold-gated."},
         {"key": "paa_stations", "label": "PAA stations", "type": "str",
          "default": "Bialystok,Suwalki,Siemiatycze",
-         "help": "Comma-separated PAA station names to monitor (plain ASCII is fine -- "
-                 "matching is diacritic/case-insensitive)."},
-        {"key": "paa_alert_dose_rate_usvh", "label": "PAA alert threshold", "type": "float",
+         "help": "Comma-separated PAA station names to include in the digest, in this "
+                 "order (plain ASCII is fine -- matching is diacritic/case-insensitive)."},
+        {"key": "paa_alert_dose_rate_usvh", "label": "PAA warning marker threshold", "type": "float",
          "default": 0.3, "unit": "uSv/h",
-         "help": "NOT an official PAA public-alert standard -- no such published threshold "
-                 "was found in research. A placeholder several times above the "
+         "help": "Purely cosmetic: a station at or above this gets a warning marker in the "
+                 "digest. NOT an official PAA public-alert standard -- no such published "
+                 "threshold was found in research. A placeholder several times above the "
                  "~0.06-0.08 uSv/h background observed at Podlaskie stations; retune from "
                  "real readings, don't treat as authoritative."},
         {"key": "paa_max_reading_age_hours", "label": "PAA max reading age", "type": "int",
          "min": 1, "default": 6, "unit": "h",
-         "help": "Skip a station reading older than this rather than alerting on stale data "
-                 "(some PAA stations have been observed days stale)."},
-        {"key": "paa_renotify_hours", "label": "PAA re-notify interval", "type": "int",
-         "min": 1, "default": 6, "unit": "h",
-         "help": "Minimum hours between repeat reminders while still above threshold."},
+         "help": "Show a station as 'no data' in the digest rather than an actually-stale "
+                 "reading (some PAA stations have been observed days stale)."},
     ]
 
     def __init__(self, bot: Any) -> None:
@@ -186,7 +193,9 @@ class AlertsService(BaseServicePlugin):
         )
 
         self.paa_enabled = self.bot.config.getboolean(section, "paa_enabled", fallback=False)
-        self.paa_poll_interval = self.bot.config.getint(section, "paa_poll_interval", fallback=3600)
+        self.paa_schedule_times = self._parse_schedule_times(
+            self.bot.config.get(section, "paa_schedule_times", fallback="06:00,18:00")
+        )
         self.paa_stations = [
             s.strip() for s in
             self.bot.config.get(section, "paa_stations", fallback="Bialystok,Suwalki,Siemiatycze").split(",")
@@ -197,9 +206,6 @@ class AlertsService(BaseServicePlugin):
         )
         self.paa_max_reading_age_hours = self.bot.config.getfloat(
             section, "paa_max_reading_age_hours", fallback=6.0
-        )
-        self.paa_renotify_hours = self.bot.config.getfloat(
-            section, "paa_renotify_hours", fallback=6.0
         )
 
         self._tasks: list[asyncio.Task] = []
@@ -215,14 +221,13 @@ class AlertsService(BaseServicePlugin):
         # Rolling one-hour send timestamps per source, for the alerts/hour cap.
         self._sent_timestamps: dict[str, deque] = {"imgw_meteo": deque(), "rso": deque()}
 
-        # Threshold-crossing state (GIOS/PAA): station -> {"state": "normal"|"elevated",
+        # Threshold-crossing state (GIOS only): station -> {"state": "normal"|"elevated",
         # "last_notified_at": iso str | None}.
         self._gios_state: dict[str, dict[str, Any]] = self._load_threshold_state(METADATA_KEY_GIOS_STATE)
-        self._paa_state: dict[str, dict[str, Any]] = self._load_threshold_state(METADATA_KEY_PAA_STATE)
 
         self.logger.info(
             "Alerts service initialized: channel=%s, imgw=%s (every %ss), rso=%s (every %ss), "
-            "gios=%s (every %ss), paa=%s (every %ss)",
+            "gios=%s (every %ss), paa=%s (at %s)",
             self.channel,
             self.imgw_enabled,
             self.imgw_poll_interval,
@@ -231,7 +236,7 @@ class AlertsService(BaseServicePlugin):
             self.gios_enabled,
             self.gios_poll_interval,
             self.paa_enabled,
-            self.paa_poll_interval,
+            ",".join(t.strftime("%H:%M") for t in self.paa_schedule_times),
         )
 
     # ------------------------------------------------------------------
@@ -266,7 +271,9 @@ class AlertsService(BaseServicePlugin):
         if self.paa_enabled:
             self._tasks.append(
                 asyncio.create_task(
-                    self._poll_loop("paa", self._check_paa, self.paa_poll_interval)
+                    self._daily_schedule_loop(
+                        "paa", self._check_paa, self.paa_schedule_times, METADATA_KEY_PAA_LAST_SLOT
+                    )
                 )
             )
 
@@ -287,9 +294,9 @@ class AlertsService(BaseServicePlugin):
         self.logger.info("Alerts service stopped")
 
     # ------------------------------------------------------------------
-    # Poll loop (shared by both sources; each source runs its own instance
-    # of this loop as an independent task, so one source's failure/timeout
-    # never delays or blocks the other)
+    # Poll loop (interval-based; IMGW/RSO/GIOS each run their own instance as
+    # an independent task, so one source's failure/timeout never delays or
+    # blocks the others)
     # ------------------------------------------------------------------
 
     async def _poll_loop(
@@ -308,6 +315,78 @@ class AlertsService(BaseServicePlugin):
             except Exception as e:
                 self.logger.error("Error in alerts poll loop (%s): %s", name, e)
                 await asyncio.sleep(60)
+
+    # ------------------------------------------------------------------
+    # Daily-schedule loop (fixed times of day, not an interval; PAA uses this).
+    #
+    # A plain "sleep N seconds" interval doesn't give fixed wall-clock times --
+    # it fires check_fn() immediately on every start() (see _poll_loop above),
+    # so a bot that restarts a few times a day would fire far more than
+    # intended, and even without restarts the actual times drift with whenever
+    # the bot happened to start rather than landing at e.g. 06:00/18:00. This
+    # loop instead computes the most recent daily slot that's already passed,
+    # fires at most once per slot (persisted to bot_metadata so a restart
+    # inside the same slot doesn't re-fire), then sleeps exactly until the next
+    # slot boundary.
+    # ------------------------------------------------------------------
+
+    async def _daily_schedule_loop(
+        self,
+        name: str,
+        check_fn: Callable[[], Coroutine[Any, Any, None]],
+        times: list[time],
+        metadata_key: str,
+    ) -> None:
+        self.logger.info(
+            "Alerts daily-schedule loop started: %s (times=%s)",
+            name, ",".join(t.strftime("%H:%M") for t in times),
+        )
+        while self._running:
+            try:
+                now = datetime.now()
+                today_slots = sorted(datetime.combine(now.date(), t) for t in times)
+                past_slots = [s for s in today_slots if s <= now]
+
+                if past_slots:
+                    candidate = past_slots[-1]
+                    if self._load_last_slot(metadata_key) != candidate.isoformat():
+                        await check_fn()
+                        self._persist_last_slot(metadata_key, candidate.isoformat())
+
+                future_slots = [s for s in today_slots if s > now]
+                next_slot = future_slots[0] if future_slots else today_slots[0] + timedelta(days=1)
+                await asyncio.sleep(max((next_slot - datetime.now()).total_seconds(), 1.0))
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                self.logger.error("Error in alerts daily-schedule loop (%s): %s", name, e)
+                await asyncio.sleep(60)
+
+    def _parse_schedule_times(self, raw: str) -> list[time]:
+        """'06:00,18:00' -> [time(6,0), time(18,0)]. Invalid entries are logged and
+        skipped; falls back to 06:00/18:00 if nothing valid remains."""
+        parsed = []
+        for part in raw.split(","):
+            part = part.strip()
+            if not part:
+                continue
+            try:
+                parsed.append(datetime.strptime(part, "%H:%M").time())
+            except ValueError:
+                self.logger.warning("Ignoring invalid schedule time %r (expected HH:MM)", part)
+        return sorted(set(parsed)) or [time(6, 0), time(18, 0)]
+
+    def _load_last_slot(self, metadata_key: str) -> Optional[str]:
+        db_manager = getattr(self.bot, "db_manager", None)
+        if not db_manager:
+            return None
+        return db_manager.get_metadata(metadata_key)
+
+    def _persist_last_slot(self, metadata_key: str, value: str) -> None:
+        db_manager = getattr(self.bot, "db_manager", None)
+        if not db_manager:
+            return
+        db_manager.set_metadata(metadata_key, value)
 
     # ------------------------------------------------------------------
     # IMGW
@@ -435,7 +514,7 @@ class AlertsService(BaseServicePlugin):
             renotify_hours=self.gios_renotify_hours,
         )
         if text:
-            await self._send_threshold_message(text)
+            await self._send_simple_message(text)
             self._persist_threshold_state(METADATA_KEY_GIOS_STATE, self._gios_state)
 
     def _format_gios_message(self, reading: dict[str, Any], elevated: bool) -> str:
@@ -449,7 +528,9 @@ class AlertsService(BaseServicePlugin):
         return text
 
     # ------------------------------------------------------------------
-    # PAA radiation monitoring (Phase 2b — threshold-crossing per station)
+    # PAA radiation monitoring (Phase 2b — scheduled digest, not threshold-gated:
+    # fires unconditionally at each configured daily time, all stations combined
+    # into one message; see _daily_schedule_loop)
     # ------------------------------------------------------------------
 
     async def _check_paa(self) -> None:
@@ -465,35 +546,22 @@ class AlertsService(BaseServicePlugin):
             self.logger.warning("PAA response parse error: %s", e)
             return
 
-        found_stations = {r["station"] for r in readings}
+        by_normalized = {alert_sources.normalize_station_name(r["station"]): r for r in readings}
+        resolved: dict[str, Optional[dict[str, Any]]] = {}
         for configured in self.paa_stations:
-            if not any(self._station_names_match(configured, s) for s in found_stations):
-                self.logger.warning("PAA station %r not found in this poll's response", configured)
-
-        changed = False
-        for reading in readings:
-            if self._paa_reading_is_stale(reading):
+            reading = by_normalized.get(alert_sources.normalize_station_name(configured))
+            if reading is not None and self._paa_reading_is_stale(reading):
                 self.logger.info(
-                    "PAA station %s reading (%s) is stale, skipping this poll",
+                    "PAA station %s reading (%s) is stale, showing as no-data in the digest",
                     reading["station"], reading.get("timestamp"),
                 )
-                continue
+                reading = None
+            if reading is None:
+                self.logger.warning("PAA station %r has no fresh reading for this digest", configured)
+            resolved[configured] = reading
 
-            elevated = reading["value"] >= self.paa_alert_dose_rate_usvh
-            text = await self._apply_threshold_state(
-                states=self._paa_state,
-                station_key=reading["station"],
-                elevated=elevated,
-                build_alert_text=lambda r=reading: self._format_paa_message(r, elevated=True),
-                build_normal_text=lambda r=reading: self._format_paa_message(r, elevated=False),
-                renotify_hours=self.paa_renotify_hours,
-            )
-            if text:
-                await self._send_threshold_message(text)
-                changed = True
-
-        if changed:
-            self._persist_threshold_state(METADATA_KEY_PAA_STATE, self._paa_state)
+        text = self._format_paa_digest(resolved)
+        await self._send_simple_message(text)
 
     def _paa_reading_is_stale(self, reading: dict[str, Any]) -> bool:
         """Fail open (not stale) when the timestamp is missing/unparseable, same
@@ -505,21 +573,23 @@ class AlertsService(BaseServicePlugin):
         age_hours = (datetime.now() - measured).total_seconds() / 3600
         return age_hours > self.paa_max_reading_age_hours
 
-    @staticmethod
-    def _station_names_match(a: str, b: str) -> bool:
-        return alert_sources.normalize_station_name(a) == alert_sources.normalize_station_name(b)
-
-    def _format_paa_message(self, reading: dict[str, Any], elevated: bool) -> str:
-        key = "services.alerts.paa.prefix" if elevated else "services.alerts.paa.normal_prefix"
-        prefix = self._translate(key)
-        icon = "☢️" if elevated else "✅"
-        # Full HH:MM DD.MM, not just the date -- PAA readings are hourly, so the
-        # exact hour matters for judging freshness at a glance.
-        when = self._format_dt_short(reading.get("timestamp"))
-        text = f"{icon} {prefix} ({reading['station']}): {reading['value']} {reading['unit']}"
-        if when:
-            text = f"{text} [{when}]"
-        return text
+    def _format_paa_digest(self, resolved: dict[str, Optional[dict[str, Any]]]) -> str:
+        """One combined message, stations in paa_stations' configured order. A
+        station without a fresh reading shows as 'no data' rather than being
+        silently dropped, so a broken/lagging station stays visible."""
+        prefix = self._translate("services.alerts.paa.digest_prefix")
+        no_data = self._translate("services.alerts.paa.no_data")
+        unit = "µSv/h"
+        parts = []
+        for configured, reading in resolved.items():
+            if reading is None:
+                parts.append(f"{configured}: {no_data}")
+                continue
+            marker = "⚠️" if reading["value"] >= self.paa_alert_dose_rate_usvh else ""
+            parts.append(f"{reading['station']}: {reading['value']}{marker}")
+            unit = reading.get("unit") or unit
+        when = datetime.now().strftime("%H:%M %d.%m")
+        return f"☢️ {prefix} [{when}]: " + ", ".join(parts) + f" {unit}"
 
     # ------------------------------------------------------------------
     # Shared: threshold state (GIOS/PAA hysteresis)
@@ -566,7 +636,11 @@ class AlertsService(BaseServicePlugin):
         states[station_key] = entry
         return text
 
-    async def _send_threshold_message(self, text: str) -> bool:
+    async def _send_simple_message(self, text: str) -> bool:
+        """Send a single pre-built text (chunked if it doesn't fit in one message) --
+        used by GIOS's threshold alerts and PAA's scheduled digest, neither of which
+        need the record/formatter/send_details machinery _send_alert has for
+        IMGW/RSO's event dedup path."""
         chunks = self.bot.command_manager.split_text_into_utf8_chunks(text, MESSAGE_CHUNK_MAX_BYTES)
         return await self.bot.command_manager.send_channel_messages_chunked(
             self.channel, chunks, scope=self.get_mesh_flood_scope()

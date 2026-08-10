@@ -5,17 +5,21 @@ seen-id persistence), the per-source alerts/hour cap, staleness filtering,
 multi-message chunking of long alerts, flood_scope threading, and message
 formatting.
 
-Phase 2b (GIOS air quality + PAA radiation): threshold-crossing with hysteresis
-(_apply_threshold_state) instead of event dedup -- alert on crossing up, stay
-silent while still elevated (until the renotify interval), alert once on
-crossing back down.
+Phase 2b:
+- GIOS air quality: threshold-crossing with hysteresis (_apply_threshold_state)
+  instead of event dedup -- alert on crossing up, stay silent while still elevated
+  (until the renotify interval), alert once on crossing back down.
+- PAA radiation: a scheduled digest (_daily_schedule_loop), not threshold-gated --
+  fires unconditionally at fixed times of day (default 06:00/18:00), one combined
+  message for all configured stations, restart-safe (won't re-fire a slot that
+  already fired today).
 
 No network calls -- alert_sources fetch functions are mocked at the call site.
 """
 
 import configparser
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
@@ -26,7 +30,7 @@ from modules.service_plugins.alerts_service import (
     MESSAGE_CHUNK_MAX_BYTES,
     METADATA_KEY_GIOS_STATE,
     METADATA_KEY_IMGW_SEEN,
-    METADATA_KEY_PAA_STATE,
+    METADATA_KEY_PAA_LAST_SLOT,
     METADATA_KEY_RSO_SEEN,
     AlertsService,
 )
@@ -572,21 +576,11 @@ class TestGiosThreshold:
 
 
 @pytest.mark.unit
-class TestPaaThreshold:
-    async def test_alert_when_above_threshold(self):
-        bot = _alerts_service_bot(paa_stations="Suwalki", paa_alert_dose_rate_usvh="0.01")
-        service = AlertsService(bot)
-        reading = dict(PAA_FRESH_READING, timestamp=_fresh_paa_timestamp())
-        with patch(
-            "modules.service_plugins.alerts_service.alert_sources.fetch_paa_radiation",
-            return_value=[reading],
-        ):
-            await service._check_paa()
-        bot.command_manager.send_channel_messages_chunked.assert_awaited_once()
-        chunks = _sent_chunk_lists(bot)[0]
-        assert "Suwałki" in "".join(chunks)
+class TestPaaDigest:
+    """PAA is a scheduled digest, not threshold-gated -- it always sends exactly
+    one combined message per check, regardless of any station's reading."""
 
-    async def test_no_alert_when_below_threshold(self):
+    async def test_digest_sent_even_when_all_stations_below_threshold(self):
         bot = _alerts_service_bot(paa_stations="Suwalki", paa_alert_dose_rate_usvh="0.3")
         service = AlertsService(bot)
         reading = dict(PAA_FRESH_READING, timestamp=_fresh_paa_timestamp())
@@ -595,30 +589,14 @@ class TestPaaThreshold:
             return_value=[reading],
         ):
             await service._check_paa()
-        bot.command_manager.send_channel_messages_chunked.assert_not_awaited()
+        bot.command_manager.send_channel_messages_chunked.assert_awaited_once()
 
-    async def test_stale_reading_is_skipped(self):
-        bot = _alerts_service_bot(
-            paa_stations="Bialystok", paa_alert_dose_rate_usvh="0.01", paa_max_reading_age_hours="6"
-        )
-        service = AlertsService(bot)
-        with patch(
-            "modules.service_plugins.alerts_service.alert_sources.fetch_paa_radiation",
-            return_value=[PAA_STALE_READING],  # 6 days old
-        ):
-            await service._check_paa()
-        bot.command_manager.send_channel_messages_chunked.assert_not_awaited()
-
-    async def test_multiple_stations_have_independent_state(self):
-        bot = _alerts_service_bot(
-            paa_stations="Suwalki,Siemiatycze", paa_alert_dose_rate_usvh="0.07"
-        )
+    async def test_digest_combines_all_stations_into_one_message(self):
+        bot = _alerts_service_bot(paa_stations="Suwalki,Siemiatycze")
         service = AlertsService(bot)
         readings = [
-            dict(PAA_FRESH_READING, station="Suwałki", value=0.084,
-                 timestamp=_fresh_paa_timestamp()),  # above threshold
-            dict(PAA_FRESH_READING, station="Siemiatycze", value=0.068,
-                 timestamp=_fresh_paa_timestamp()),  # below threshold
+            dict(PAA_FRESH_READING, station="Suwałki", value=0.084, timestamp=_fresh_paa_timestamp()),
+            dict(PAA_FRESH_READING, station="Siemiatycze", value=0.068, timestamp=_fresh_paa_timestamp()),
         ]
         with patch(
             "modules.service_plugins.alerts_service.alert_sources.fetch_paa_radiation",
@@ -628,10 +606,60 @@ class TestPaaThreshold:
         assert bot.command_manager.send_channel_messages_chunked.await_count == 1
         sent_text = "".join(_sent_chunk_lists(bot)[0])
         assert "Suwałki" in sent_text
-        assert service._paa_state["Suwałki"]["state"] == "elevated"
-        assert service._paa_state["Siemiatycze"]["state"] == "normal"
+        assert "Siemiatycze" in sent_text
 
-    async def test_missing_configured_station_logs_warning_without_crashing(self):
+    async def test_stations_appear_in_configured_order(self):
+        bot = _alerts_service_bot(paa_stations="Siemiatycze,Bialystok,Suwalki")
+        service = AlertsService(bot)
+        readings = [
+            dict(PAA_FRESH_READING, station="Suwałki", value=0.084, timestamp=_fresh_paa_timestamp()),
+            dict(PAA_FRESH_READING, station="Siemiatycze", value=0.068, timestamp=_fresh_paa_timestamp()),
+            dict(PAA_FRESH_READING, station="Białystok", value=0.064, timestamp=_fresh_paa_timestamp()),
+        ]
+        with patch(
+            "modules.service_plugins.alerts_service.alert_sources.fetch_paa_radiation",
+            return_value=readings,
+        ):
+            await service._check_paa()
+        sent_text = "".join(_sent_chunk_lists(bot)[0])
+        assert sent_text.index("Siemiatycze") < sent_text.index("Białystok") < sent_text.index("Suwałki")
+
+    async def test_warning_marker_shown_above_threshold(self):
+        bot = _alerts_service_bot(paa_stations="Suwalki", paa_alert_dose_rate_usvh="0.01")
+        service = AlertsService(bot)
+        reading = dict(PAA_FRESH_READING, timestamp=_fresh_paa_timestamp())  # 0.084 >= 0.01
+        with patch(
+            "modules.service_plugins.alerts_service.alert_sources.fetch_paa_radiation",
+            return_value=[reading],
+        ):
+            await service._check_paa()
+        sent_text = "".join(_sent_chunk_lists(bot)[0])
+        assert "⚠️" in sent_text
+
+    async def test_no_warning_marker_below_threshold(self):
+        bot = _alerts_service_bot(paa_stations="Suwalki", paa_alert_dose_rate_usvh="0.3")
+        service = AlertsService(bot)
+        reading = dict(PAA_FRESH_READING, timestamp=_fresh_paa_timestamp())  # 0.084 < 0.3
+        with patch(
+            "modules.service_plugins.alerts_service.alert_sources.fetch_paa_radiation",
+            return_value=[reading],
+        ):
+            await service._check_paa()
+        sent_text = "".join(_sent_chunk_lists(bot)[0])
+        assert "⚠️" not in sent_text
+
+    async def test_stale_station_shown_as_no_data_not_omitted(self):
+        bot = _alerts_service_bot(paa_stations="Bialystok", paa_max_reading_age_hours="6")
+        service = AlertsService(bot)
+        with patch(
+            "modules.service_plugins.alerts_service.alert_sources.fetch_paa_radiation",
+            return_value=[PAA_STALE_READING],  # 6 days old
+        ):
+            await service._check_paa()
+        sent_text = "".join(_sent_chunk_lists(bot)[0])
+        assert "Bialystok" in sent_text  # configured name, since no fresh real reading
+
+    async def test_missing_configured_station_shown_as_no_data_and_warns(self):
         bot = _alerts_service_bot(paa_stations="Nonexistent Station")
         service = AlertsService(bot)
         with patch(
@@ -639,25 +667,27 @@ class TestPaaThreshold:
             return_value=[],
         ):
             await service._check_paa()  # must not raise
-        bot.command_manager.send_channel_messages_chunked.assert_not_awaited()
+        bot.command_manager.send_channel_messages_chunked.assert_awaited_once()  # still sends the digest
         bot.logger.warning.assert_called()
 
-    async def test_back_to_normal_message_on_recovery(self):
-        bot = _alerts_service_bot(paa_stations="Suwalki", paa_alert_dose_rate_usvh="0.3")
+    async def test_digest_has_no_persisted_per_station_state(self):
+        """Unlike GIOS, PAA is stateless per-station -- there's no hysteresis to
+        get stuck in, so nothing here should touch bot_metadata beyond the
+        schedule's last-fired-slot marker (covered in TestPaaSchedule)."""
+        db_manager = _FakeDBManager()
+        bot = _alerts_service_bot(db_manager=db_manager, paa_stations="Suwalki")
         service = AlertsService(bot)
-        service._paa_state["Suwałki"] = {"state": "elevated", "last_notified_at": None}
-        reading = dict(PAA_FRESH_READING, timestamp=_fresh_paa_timestamp())  # 0.084, below 0.3
+        reading = dict(PAA_FRESH_READING, timestamp=_fresh_paa_timestamp())
         with patch(
             "modules.service_plugins.alerts_service.alert_sources.fetch_paa_radiation",
             return_value=[reading],
         ):
             await service._check_paa()
-        bot.command_manager.send_channel_messages_chunked.assert_awaited_once()
-        assert service._paa_state["Suwałki"]["state"] == "normal"
+        assert db_manager.get_metadata(METADATA_KEY_PAA_LAST_SLOT) is None  # _check_paa doesn't set it
 
 
 @pytest.mark.unit
-class TestThresholdStatePersistence:
+class TestGiosStatePersistence:
     async def test_gios_state_persisted_after_transition(self):
         db_manager = _FakeDBManager()
         bot = _alerts_service_bot(db_manager=db_manager, gios_alert_category="Zły")
@@ -692,20 +722,116 @@ class TestThresholdStatePersistence:
             await service2._check_gios()
         bot2.command_manager.send_channel_messages_chunked.assert_not_awaited()
 
-    async def test_paa_state_persisted_per_station(self):
-        db_manager = _FakeDBManager()
-        bot = _alerts_service_bot(
-            db_manager=db_manager, paa_stations="Suwalki", paa_alert_dose_rate_usvh="0.01"
-        )
+
+@pytest.mark.unit
+class TestPaaSchedule:
+    """_daily_schedule_loop: fixed wall-clock times, not an interval -- fires at
+    most once per configured slot per day, restart-safe via a persisted
+    last-fired-slot marker."""
+
+    def test_parses_valid_times(self):
+        bot = _alerts_service_bot()
         service = AlertsService(bot)
-        reading = dict(PAA_FRESH_READING, timestamp=_fresh_paa_timestamp())
-        with patch(
-            "modules.service_plugins.alerts_service.alert_sources.fetch_paa_radiation",
-            return_value=[reading],
-        ):
-            await service._check_paa()
-        persisted = json.loads(db_manager.get_metadata(METADATA_KEY_PAA_STATE))
-        assert persisted["Suwałki"]["state"] == "elevated"
+        assert service._parse_schedule_times("06:00,18:00") == [time(6, 0), time(18, 0)]
+
+    def test_sorts_and_dedupes(self):
+        bot = _alerts_service_bot()
+        service = AlertsService(bot)
+        assert service._parse_schedule_times("18:00,06:00,06:00") == [time(6, 0), time(18, 0)]
+
+    def test_invalid_entries_skipped_with_warning(self):
+        bot = _alerts_service_bot()
+        service = AlertsService(bot)
+        result = service._parse_schedule_times("06:00,not-a-time,18:00")
+        assert result == [time(6, 0), time(18, 0)]
+        bot.logger.warning.assert_called()
+
+    def test_falls_back_to_default_when_nothing_valid(self):
+        bot = _alerts_service_bot()
+        service = AlertsService(bot)
+        assert service._parse_schedule_times("garbage") == [time(6, 0), time(18, 0)]
+
+    async def test_fires_for_a_slot_already_passed_today_on_first_run(self, monkeypatch):
+        """Startup catch-up: if the bot starts after a slot already passed today
+        and it's never fired, fire now rather than waiting until tomorrow."""
+        bot = _alerts_service_bot()
+        service = AlertsService(bot)
+        fired = []
+
+        async def fake_check():
+            fired.append(1)
+
+        async def fake_sleep(seconds):
+            service._running = False
+
+        monkeypatch.setattr("modules.service_plugins.alerts_service.asyncio.sleep", fake_sleep)
+        service._running = True
+        # Midnight has always already passed "today" by construction, regardless
+        # of when this test actually runs -- deterministic without freezing time.
+        await service._daily_schedule_loop("test", fake_check, [time(0, 0)], "test_slot_key_1")
+        assert len(fired) == 1
+
+    async def test_does_not_refire_the_same_slot_twice(self, monkeypatch):
+        bot = _alerts_service_bot()
+        service = AlertsService(bot)
+        fired = []
+
+        async def fake_check():
+            fired.append(1)
+
+        call_count = {"n": 0}
+
+        async def fake_sleep(seconds):
+            call_count["n"] += 1
+            if call_count["n"] >= 2:
+                service._running = False
+
+        monkeypatch.setattr("modules.service_plugins.alerts_service.asyncio.sleep", fake_sleep)
+        service._running = True
+        await service._daily_schedule_loop("test", fake_check, [time(0, 0)], "test_slot_key_2")
+        assert len(fired) == 1  # second loop iteration sees the same already-fired slot
+
+    async def test_restart_with_persisted_slot_does_not_refire(self, monkeypatch):
+        db_manager = _FakeDBManager()
+        bot = _alerts_service_bot(db_manager=db_manager)
+        service = AlertsService(bot)
+        # Pre-fire today's midnight slot, simulating a previous process run.
+        today_midnight = datetime.combine(datetime.now().date(), time(0, 0))
+        service._persist_last_slot("test_slot_key_3", today_midnight.isoformat())
+
+        fired = []
+
+        async def fake_check():
+            fired.append(1)
+
+        async def fake_sleep(seconds):
+            service._running = False
+
+        monkeypatch.setattr("modules.service_plugins.alerts_service.asyncio.sleep", fake_sleep)
+        service._running = True
+        await service._daily_schedule_loop("test", fake_check, [time(0, 0)], "test_slot_key_3")
+        assert fired == []
+
+    async def test_sleeps_until_next_slot_boundary(self, monkeypatch):
+        bot = _alerts_service_bot()
+        service = AlertsService(bot)
+
+        async def fake_check():
+            pass
+
+        sleep_calls = []
+
+        async def fake_sleep(seconds):
+            sleep_calls.append(seconds)
+            service._running = False
+
+        monkeypatch.setattr("modules.service_plugins.alerts_service.asyncio.sleep", fake_sleep)
+        service._running = True
+        await service._daily_schedule_loop(
+            "test", fake_check, [time(0, 0), time(23, 59)], "test_slot_key_4"
+        )
+        assert len(sleep_calls) == 1
+        assert 0 < sleep_calls[0] <= 24 * 3600
 
 
 @pytest.mark.unit
@@ -726,14 +852,13 @@ class TestConfigDefaults:
         assert service.gios_enabled is False
         assert service.paa_enabled is False
         assert service.gios_poll_interval == 900
-        assert service.paa_poll_interval == 3600
         assert service.gios_station_id == 11174
         assert service.gios_alert_category == "Zły"
         assert service.gios_renotify_hours == 6.0
+        assert service.paa_schedule_times == [time(6, 0), time(18, 0)]
         assert service.paa_stations == ["Bialystok", "Suwalki", "Siemiatycze"]
         assert service.paa_alert_dose_rate_usvh == 0.3
         assert service.paa_max_reading_age_hours == 6.0
-        assert service.paa_renotify_hours == 6.0
 
     async def test_imgw_and_rso_independent_pollers(self):
         """Starting the service creates one task per enabled source."""
