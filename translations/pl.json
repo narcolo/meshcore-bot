@@ -1357,5 +1357,16 @@
     "analytics": "Komendy analityczne",
     "meshcore_info": "Komendy informacyjne MeshCore",
     "management": "Komendy zarządzające"
+  },
+  "services": {
+    "alerts": {
+      "imgw_meteo": {
+        "prefix": "Ostrzeżenie IMGW"
+      },
+      "rso": {
+        "prefix": "Alert RSO"
+      },
+      "until": "do {time}"
+    }
   }
 }

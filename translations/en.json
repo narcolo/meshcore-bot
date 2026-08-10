@@ -1474,6 +1474,15 @@
         "sender": "Sender: {sender}",
         "area": "Area: {areas}"
       }
+    },
+    "alerts": {
+      "imgw_meteo": {
+        "prefix": "IMGW warning"
+      },
+      "rso": {
+        "prefix": "RSO alert"
+      },
+      "until": "until {time}"
     }
   }
 }
