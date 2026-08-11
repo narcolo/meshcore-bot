@@ -102,6 +102,17 @@ def fetch_imgw_meteo_warnings() -> list[dict[str, Any]]:
         headers={"User-Agent": USER_AGENT},
         timeout=TIMEOUT,
     )
+    if resp.status_code == 404:
+        # IMGW returns 404 (not 200 + []) with {"status": false, "message": "No
+        # products were found"} when there are currently zero active warnings
+        # nationwide -- confirmed live 2026-08-11. That's a normal empty result,
+        # not a request failure; only treat it as one if the body doesn't match.
+        try:
+            body = resp.json()
+        except ValueError:
+            body = {}
+        if body.get("message") == "No products were found":
+            return []
     resp.raise_for_status()
     warnings = resp.json()
 

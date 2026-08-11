@@ -35,6 +35,16 @@ from modules.service_plugins.alerts_service import (
     AlertsService,
 )
 
+
+def _recent(hours_offset: float) -> str:
+    """Timestamp relative to whenever the test suite actually runs -- fixtures
+    must never hardcode an absolute date, or they silently start failing
+    _is_stale's 24h check the moment a real day boundary passes (this bit us:
+    see the 2026-08-11 regression where every IMGW/RSO fixture went stale
+    overnight purely because the calendar moved, not because of a code bug)."""
+    return (datetime.now() + timedelta(hours=hours_offset)).strftime("%Y-%m-%d %H:%M:%S")
+
+
 IMGW_RECORD = {
     "source": "imgw_meteo",
     "external_id": "Wr20260810041907317",
@@ -43,9 +53,9 @@ IMGW_RECORD = {
     "area": "Bialystok / powiat bialostocki",
     "title": "Burze",
     "description": "Prognozowane sa lokalne burze z silnym wiatrem i opadami deszczu.",
-    "published_at": "2026-08-10 06:19:00",
-    "valid_from": "2026-08-10 19:00:00",
-    "valid_to": "2026-08-11 03:00:00",
+    "published_at": _recent(-2),
+    "valid_from": _recent(-1),
+    "valid_to": _recent(6),
     "url": None,
 }
 
@@ -57,9 +67,9 @@ RSO_RECORD = {
     "area": "Podlaskie",
     "title": "ALERT RCB - BURZE/2",
     "description": "Pogoda: dzis i w nocy burze z silnym wiatrem i intensywnymi opadami deszczu.",
-    "published_at": "2026-08-10 14:00:52",
-    "valid_from": "2026-08-10 13:58:00",
-    "valid_to": "2026-08-11 04:00:00",
+    "published_at": _recent(-1),
+    "valid_from": _recent(-1),
+    "valid_to": _recent(6),
     "url": None,
 }
 
@@ -178,7 +188,7 @@ class TestRateLimit:
     async def test_alerts_beyond_cap_are_suppressed_not_sent(self):
         bot = _alerts_service_bot()
         service = AlertsService(bot)
-        record_2 = dict(IMGW_RECORD, external_id="Wr_second", published_at="2026-08-10 07:00:00")
+        record_2 = dict(IMGW_RECORD, external_id="Wr_second", published_at=_recent(-1.5))
         await service._process_new_alerts(
             "imgw_meteo", [IMGW_RECORD, record_2], service._format_imgw_message,
             send_details=False, max_alerts_per_hour=1, max_age_hours=24,
@@ -189,7 +199,7 @@ class TestRateLimit:
         """A suppressed alert is a hard drop (logged), not a deferred retry."""
         bot = _alerts_service_bot()
         service = AlertsService(bot)
-        record_2 = dict(IMGW_RECORD, external_id="Wr_second", published_at="2026-08-10 07:00:00")
+        record_2 = dict(IMGW_RECORD, external_id="Wr_second", published_at=_recent(-1.5))
         await service._process_new_alerts(
             "imgw_meteo", [IMGW_RECORD, record_2], service._format_imgw_message,
             send_details=False, max_alerts_per_hour=1, max_age_hours=24,
@@ -450,15 +460,24 @@ class TestMessageFormatting:
         text = service._format_imgw_message(IMGW_RECORD)
         assert "Burze" in text
         assert "st.1" in text
-        assert "03:00 11.08" in text
-        assert "[10.08]" in text  # published_at date, distinct from the valid_to time
+        expected_valid_to = datetime.strptime(
+            IMGW_RECORD["valid_to"], "%Y-%m-%d %H:%M:%S"
+        ).strftime("%H:%M %d.%m")
+        assert expected_valid_to in text
+        expected_date = datetime.strptime(
+            IMGW_RECORD["published_at"], "%Y-%m-%d %H:%M:%S"
+        ).strftime("%d.%m")
+        assert f"[{expected_date}]" in text  # published_at date, distinct from the valid_to time
 
     def test_rso_message_contains_title_and_full_description(self):
         bot = _alerts_service_bot()
         service = AlertsService(bot)
         text = service._format_rso_message(RSO_RECORD)
         assert "ALERT RCB - BURZE/2" in text
-        assert "[10.08]" in text  # published_at date
+        expected_date = datetime.strptime(
+            RSO_RECORD["published_at"], "%Y-%m-%d %H:%M:%S"
+        ).strftime("%d.%m")
+        assert f"[{expected_date}]" in text  # published_at date
         assert RSO_RECORD["description"] in text  # full text, not a truncated snippet
 
     def test_date_omitted_when_published_at_missing(self):
