@@ -12,6 +12,7 @@ test_imgw_meteo.py/test_rso.py/test_gios.py/test_paa.py.
 import configparser
 import sys
 import textwrap
+from datetime import datetime, time
 from unittest.mock import MagicMock, Mock
 
 import pytest
@@ -20,9 +21,27 @@ from modules.service_plugins.alert_modules.base import AlertSourceBase
 from modules.service_plugins.alerts_service import AlertsService
 
 
-def _bot(**config_overrides):
+class _FakeDBManager:
+    def __init__(self):
+        self._store: dict[str, str] = {}
+
+    def get_metadata(self, key):
+        return self._store.get(key)
+
+    def set_metadata(self, key, value):
+        self._store[key] = value
+
+
+def _bot(db_manager=None, **config_overrides):
     bot = MagicMock()
     bot.logger = Mock()
+    # A well-behaved fake by default, not an unconfigured MagicMock attribute:
+    # real sources (ImgwMeteoSource, RsoSource, ...) load dedup state from
+    # bot.db_manager at construction, and a truthy-but-non-JSON mock there
+    # would log a spurious warning on every AlertsService(bot) in this file --
+    # and _daily_schedule_loop's persisted-last-slot tests need get/set_metadata
+    # to actually round-trip, which a bare `None` can't do either.
+    bot.db_manager = db_manager if db_manager is not None else _FakeDBManager()
     config = configparser.ConfigParser()
     config.add_section("Alerts_Service")
     config.set("Alerts_Service", "enabled", "true")
@@ -106,3 +125,90 @@ class TestLifecycle:
     # gating happens one level up, in ServicePluginLoader.load_service(), which
     # never constructs the class at all when [Alerts_Service] enabled=false. So
     # there's no meaningful "construct a disabled AlertsService" case to test here.
+
+
+@pytest.mark.unit
+class TestDailyScheduleLoop:
+    """_daily_schedule_loop: fixed wall-clock times, not an interval -- fires at
+    most once per configured slot per day, restart-safe via a persisted
+    last-fired-slot marker. Used by PAA (schedule_kind="daily"); the loop itself
+    stays a generic orchestrator primitive, independent of any one source."""
+
+    async def test_fires_for_a_slot_already_passed_today_on_first_run(self, monkeypatch):
+        """Startup catch-up: if the bot starts after a slot already passed today
+        and it's never fired, fire now rather than waiting until tomorrow."""
+        service = AlertsService(_bot())
+        fired = []
+
+        async def fake_check():
+            fired.append(1)
+
+        async def fake_sleep(seconds):
+            service._running = False
+
+        monkeypatch.setattr("modules.service_plugins.alerts_service.asyncio.sleep", fake_sleep)
+        service._running = True
+        # Midnight has always already passed "today" by construction, regardless
+        # of when this test actually runs -- deterministic without freezing time.
+        await service._daily_schedule_loop("test", fake_check, [time(0, 0)], "test_slot_key_1")
+        assert len(fired) == 1
+
+    async def test_does_not_refire_the_same_slot_twice(self, monkeypatch):
+        service = AlertsService(_bot())
+        fired = []
+
+        async def fake_check():
+            fired.append(1)
+
+        call_count = {"n": 0}
+
+        async def fake_sleep(seconds):
+            call_count["n"] += 1
+            if call_count["n"] >= 2:
+                service._running = False
+
+        monkeypatch.setattr("modules.service_plugins.alerts_service.asyncio.sleep", fake_sleep)
+        service._running = True
+        await service._daily_schedule_loop("test", fake_check, [time(0, 0)], "test_slot_key_2")
+        assert len(fired) == 1  # second loop iteration sees the same already-fired slot
+
+    async def test_restart_with_persisted_slot_does_not_refire(self, monkeypatch):
+        db_manager = _FakeDBManager()
+        bot = _bot(db_manager=db_manager)
+        service = AlertsService(bot)
+        # Pre-fire today's midnight slot, simulating a previous process run.
+        today_midnight = datetime.combine(datetime.now().date(), time(0, 0))
+        service._persist_last_slot("test_slot_key_3", today_midnight.isoformat())
+
+        fired = []
+
+        async def fake_check():
+            fired.append(1)
+
+        async def fake_sleep(seconds):
+            service._running = False
+
+        monkeypatch.setattr("modules.service_plugins.alerts_service.asyncio.sleep", fake_sleep)
+        service._running = True
+        await service._daily_schedule_loop("test", fake_check, [time(0, 0)], "test_slot_key_3")
+        assert fired == []
+
+    async def test_sleeps_until_next_slot_boundary(self, monkeypatch):
+        service = AlertsService(_bot())
+
+        async def fake_check():
+            pass
+
+        sleep_calls = []
+
+        async def fake_sleep(seconds):
+            sleep_calls.append(seconds)
+            service._running = False
+
+        monkeypatch.setattr("modules.service_plugins.alerts_service.asyncio.sleep", fake_sleep)
+        service._running = True
+        await service._daily_schedule_loop(
+            "test", fake_check, [time(0, 0), time(23, 59)], "test_slot_key_4"
+        )
+        assert len(sleep_calls) == 1
+        assert 0 < sleep_calls[0] <= 24 * 3600

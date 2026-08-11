@@ -2208,11 +2208,13 @@ maxlongitude = -114.0
 # Default: true
 send_link = true
 [Alerts_Service]
-# Background push service (Phase 2a) -- automatically polls official Bialystok/Podlaskie
-# alert sources and pushes new alerts to a MeshCore channel with no user interaction.
-# See plans/alert-feeds-research.md and plans/phase2-alert-integration-plan.md for the
-# source research and design behind this service. GIOS air quality and PAA radiation
-# monitoring are Phase 2b and are not implemented by this section yet.
+# Background push service -- automatically polls official Bialystok/Podlaskie alert
+# sources (IMGW meteo warnings, RSO, GIOS air quality, PAA radiation) and pushes new
+# alerts to a MeshCore channel with no user interaction. See
+# plans/alert-feeds-research.md and plans/phase2-alert-integration-plan.md for the
+# source research and design behind this service. Each source is a self-contained
+# module under modules/service_plugins/alert_modules/, auto-discovered at startup --
+# GIOS/PAA are off by default (opt-in via gios_enabled/paa_enabled below).
 enabled = false
 
 # Channel to post alerts to
@@ -2324,6 +2326,13 @@ gios_poll_interval = 900
 # GIOS station to monitor. 11174 = ul. 42 Pulku Piechoty, Bialystok -- the only
 # Bialystok station with enough sensors (SO2/NO2/PM10/PM2.5/O3) to compute an
 # overall index; see plans/alert-feeds-research.md for the other stations found.
+# To find a station for another city: GET
+# https://api.gios.gov.pl/pjp-api/v1/rest/station/findAll (add
+# ?page=0&size=500 to get everything in one page) lists every station with its
+# id/name/city/coordinates -- pick one near you, then confirm with a live GET
+# to https://api.gios.gov.pl/pjp-api/v1/rest/aqindex/getIndex/<id> (with header
+# Accept: application/ld+json) that it actually returns a computed index and
+# not "Brak indeksu" (not enough sensors at that station for an overall index).
 gios_station_id = 11174
 
 # Alert when the AQI category reaches or exceeds this. Polish 6-level scale, worst
@@ -2353,8 +2362,23 @@ paa_schedule_times = 06:00,18:00
 # Comma-separated PAA station names to include in the digest, in this order. Plain
 # ASCII is fine -- matching is diacritic- and case-insensitive (the real station
 # names are "Białystok"/"Suwałki"). See plans/alert-feeds-research.md for the full
-# list of Podlaskie-area stations.
+# list of Podlaskie-area stations. A station must also fall inside paa_bbox below
+# to be found at all -- if a correctly-spelled station keeps showing as "no data",
+# check that first.
 paa_stations = Bialystok,Suwalki,Siemiatycze
+
+# WFS bounding box (min_lon,min_lat,max_lon,max_lat,EPSG:4326) limiting which PAA
+# stations the query even considers -- paa_stations above is filtered client-side
+# from whatever this box returns, so a station outside it is silently never found.
+# Default covers wojewodztwo podlaskie and its immediate neighbors. To monitor
+# stations elsewhere, get your area's rough lat/lon range (e.g. via
+# bboxfinder.com, in "lon lat" / EPSG:4326 mode) and widen generously -- a
+# bigger box just returns more stations in the raw fetch, it costs nothing
+# extra since matching to paa_stations still happens after the fact. To see
+# every PAA station regardless of region (e.g. to find exact names/coordinates
+# once), temporarily set this to a full-Poland box like
+# "14.0,49.0,24.2,55.0,EPSG:4326".
+paa_bbox = 21.5,52.0,24.5,54.5,EPSG:4326
 
 # Purely cosmetic: a station at or above this gets a warning marker in the digest.
 # NOT sourced from an official PAA public-alert standard -- no such published
