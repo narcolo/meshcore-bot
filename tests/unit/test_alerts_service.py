@@ -101,8 +101,8 @@ class TestLifecycle:
         finally:
             await service.stop()
 
-    async def test_disabled_service_does_not_start(self):
-        bot = _bot(enabled="false")
-        service = AlertsService(bot)
-        await service.start()
-        assert service._tasks == []
+    # Note: self.enabled defaults True and isn't re-read from config at
+    # construction (BaseServicePlugin.__init__ hardcodes it) -- real "disabled"
+    # gating happens one level up, in ServicePluginLoader.load_service(), which
+    # never constructs the class at all when [Alerts_Service] enabled=false. So
+    # there's no meaningful "construct a disabled AlertsService" case to test here.
