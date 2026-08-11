@@ -36,6 +36,13 @@ def _bot(**config_overrides):
     bot = MagicMock()
     bot.logger = Mock()
     bot.translator = Translator("en")
+    # Explicitly None (not an auto-generated MagicMock attribute): constructing
+    # AlertsService now also discovers/constructs real sources (ImgwMeteoSource,
+    # RsoSource, ...), whose EventAlertSourceBase.__init__ loads seen-ids from
+    # bot.db_manager -- an unconfigured MagicMock there would return truthy,
+    # non-JSON garbage and log a spurious warning, polluting these tests'
+    # logger.warning call-count assertions.
+    bot.db_manager = None
     bot.command_manager.split_text_into_utf8_chunks = CommandManager.split_text_into_utf8_chunks
     bot.command_manager.send_channel_messages_chunked = AsyncMock(return_value=True)
     config = configparser.ConfigParser()

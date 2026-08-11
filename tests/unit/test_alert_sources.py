@@ -166,15 +166,44 @@ class TestFetchImgwMeteoWarnings:
             with pytest.raises(requests.exceptions.HTTPError):
                 alert_sources.fetch_imgw_meteo_warnings()
 
+    def test_custom_teryt_codes_filter_to_a_different_region(self):
+        """teryt_codes is the actual portability knob -- a deployment for a
+        different city passes its own set instead of the Bialystok default."""
+        warning = dict(IMGW_WARNING_ELSEWHERE, teryt=["1465"])  # matches neither default code
+        with patch(
+            "modules.clients.alert_sources.requests.get",
+            return_value=_mock_response([IMGW_WARNING_TOUCHING_BIALYSTOK, warning]),
+        ):
+            records = alert_sources.fetch_imgw_meteo_warnings(teryt_codes={"1465"})
+        assert len(records) == 1
+        assert records[0]["external_id"] == warning["id"]
+
+    def test_custom_area_label_is_stored_on_every_record(self):
+        with patch(
+            "modules.clients.alert_sources.requests.get",
+            return_value=_mock_response([IMGW_WARNING_TOUCHING_BIALYSTOK]),
+        ):
+            records = alert_sources.fetch_imgw_meteo_warnings(area_label="Krakow / powiat krakowski")
+        assert records[0]["area"] == "Krakow / powiat krakowski"
+
+    def test_default_teryt_codes_and_area_label_match_bialystok(self):
+        """Defaults preserve pre-region-config behavior exactly."""
+        with patch(
+            "modules.clients.alert_sources.requests.get",
+            return_value=_mock_response([IMGW_WARNING_TOUCHING_BIALYSTOK]),
+        ):
+            records = alert_sources.fetch_imgw_meteo_warnings()
+        assert records[0]["area"] == "Bialystok / powiat bialostocki"
+
 
 @pytest.mark.unit
-class TestFetchRsoPodlaskie:
+class TestFetchRsoAlerts:
     def test_normalizes_all_fields(self):
         with patch(
             "modules.clients.alert_sources.requests.get",
             return_value=_mock_response(RSO_RESPONSE),
         ):
-            records = alert_sources.fetch_rso_podlaskie()
+            records = alert_sources.fetch_rso_alerts()
 
         assert len(records) == 2
         first = records[0]
@@ -195,7 +224,7 @@ class TestFetchRsoPodlaskie:
             "modules.clients.alert_sources.requests.get",
             return_value=_mock_response({"pagination": {}, "newses": []}),
         ):
-            records = alert_sources.fetch_rso_podlaskie()
+            records = alert_sources.fetch_rso_alerts()
         assert records == []
 
     def test_missing_provinces_falls_back_to_podlaskie(self):
@@ -205,8 +234,29 @@ class TestFetchRsoPodlaskie:
             "modules.clients.alert_sources.requests.get",
             return_value=_mock_response({"newses": [item]}),
         ):
-            records = alert_sources.fetch_rso_podlaskie()
+            records = alert_sources.fetch_rso_alerts()
         assert records[0]["area"] == "Podlaskie"
+
+    def test_custom_wojewodztwo_is_used_in_the_request_url(self):
+        """wojewodztwo is the actual portability knob -- a deployment for a
+        different region passes its own slug instead of the podlaskie default."""
+        with patch(
+            "modules.clients.alert_sources.requests.get",
+            return_value=_mock_response({"newses": []}),
+        ) as mock_get:
+            alert_sources.fetch_rso_alerts(wojewodztwo="mazowieckie")
+        requested_url = mock_get.call_args[0][0]
+        assert "/komunikaty/mazowieckie/" in requested_url
+
+    def test_missing_provinces_falls_back_to_custom_wojewodztwo(self):
+        item = dict(RSO_RESPONSE["newses"][0])
+        item["provinces"] = {}
+        with patch(
+            "modules.clients.alert_sources.requests.get",
+            return_value=_mock_response({"newses": [item]}),
+        ):
+            records = alert_sources.fetch_rso_alerts(wojewodztwo="mazowieckie")
+        assert records[0]["area"] == "Mazowieckie"
 
 
 GIOS_AQINDEX_RESPONSE = {

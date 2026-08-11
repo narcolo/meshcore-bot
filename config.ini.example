@@ -2223,8 +2223,9 @@ channel = general
 flood_scope =
 
 # --- IMGW meteorological warnings ---
-# Filtered to warnings whose teryt[] intersects Bialystok (2061) or powiat bialostocki
-# (2002) -- see plans/alert-feeds-research.md for how this filtering was verified.
+# IMGW's warnings feed is nationwide; imgw_meteo_teryt_codes below is what actually
+# scopes it to one city/powiat -- see plans/alert-feeds-research.md for how this
+# filtering was verified for Bialystok.
 imgw_meteo_enabled = true
 
 # Poll interval (seconds). Default: 300 (5 minutes)
@@ -2245,16 +2246,36 @@ imgw_meteo_max_alerts_per_hour = 12
 # was recently published.
 imgw_meteo_max_age_hours = 24
 
+# Comma-separated TERYT codes (official Polish administrative-unit identifiers) --
+# a warning is included if its own teryt[] array shares ANY code with this list.
+# Default = city of Bialystok (2061) + powiat bialostocki (2002). To point this at
+# a different city/powiat, get its TERYT code one of two ways:
+#   1. GUS TERYT registry search: https://eteryt.stat.gov.pl/eteryt/rejestr_teryt/udostepnianie_danych/baza_teryt/rejestrterc/rejestrterc.aspx
+#      -- search by name, use the "gmina"/"powiat" numeric code shown there.
+#   2. Empirically: temporarily set this to a wide net of codes you find via (1),
+#      run once, and check the `teryt` array IMGW returns on any warning that
+#      actually covers your area (the raw API response, not the bot's normalized
+#      record) -- IMGW warnings carry every teryt code they apply to.
+# A city usually needs BOTH its city code and its surrounding powiat code, like
+# Bialystok's 2061 (miasto) + 2002 (powiat) above, since some warnings are issued
+# for one but not the other.
+imgw_meteo_teryt_codes = 2061,2002
+
+# Human-readable label for the codes above -- shown as {area} in imgw_meteo_template
+# (not used by the default "compact" preset). Purely cosmetic, no effect on filtering.
+imgw_meteo_area_label = Bialystok / powiat bialostocki
+
 # Message template: either a preset name or a custom format string. Empty = compact.
 # Presets: compact (default), minimal ("⚠️ {title} st.{severity}"), detailed (compact +
 # full description on a second line). Available placeholders: prefix, title, severity,
-# date, until, description, date_part, until_part -- the last two are pre-built by the
-# code (" [10.08]"/" — until ..." or "" when absent) so a custom template referencing
-# them never ends up with a dangling "[]" when a warning has no date/expiry, e.g.
-# compact's actual string is "⚠️ {prefix}: {title} (st.{severity}){date_part}{until_part}".
+# date, until, description, area, date_part, until_part -- the last two are pre-built
+# by the code (" [10.08]"/" — until ..." or "" when absent) so a custom template
+# referencing them never ends up with a dangling "[]" when a warning has no
+# date/expiry, e.g. compact's actual string is
+# "⚠️ {prefix}: {title} (st.{severity}){date_part}{until_part}".
 imgw_meteo_template =
 
-# --- RSO (Regionalny System Ostrzegania), wojewodztwo podlaskie ---
+# --- RSO (Regionalny System Ostrzegania) ---
 # Also carries republished Alert RCB messages -- there is no standalone live RCB
 # feed (see research doc), so this is the practical integration point for those too.
 rso_enabled = true
@@ -2273,6 +2294,15 @@ rso_max_alerts_per_hour = 12
 # Skip alerts published longer ago than this many hours (same stale-dedup-reset
 # guard as imgw_meteo_max_age_hours above)
 rso_max_age_hours = 24
+
+# Lowercase wojewodztwo (province) slug, used directly in the RSO URL
+# (komunikaty.tvp.pl/komunikaty/<slug>/wszystkie) -- no separate lookup needed,
+# it's just the ASCII wojewodztwo name. One of the 16: dolnoslaskie,
+# kujawsko-pomorskie, lubelskie, lubuskie, lodzkie, malopolskie, mazowieckie,
+# opolskie, podkarpackie, podlaskie, pomorskie, slaskie, swietokrzyskie,
+# warminsko-mazurskie, wielkopolskie, zachodniopomorskie. Verify by fetching the
+# URL yourself once (a valid slug returns JSON, an invalid one won't).
+rso_wojewodztwo = podlaskie
 
 # Message template: either a preset name or a custom format string. Empty = compact.
 # Presets: compact (default), minimal ("📢 {title}"), title_only ("📢 {prefix}: {title}",

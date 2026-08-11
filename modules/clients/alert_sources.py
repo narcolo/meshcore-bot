@@ -24,14 +24,18 @@ USER_AGENT = "meshcore-bot-alerts/1.0 (+https://github.com/agessaman/meshcore-bo
 
 # TERYT codes confirmed live during research (2026-08-10): 2061 = miasto Bialystok,
 # 2002 = powiat bialostocki. IMGW meteo warnings carry a teryt[] array per warning.
+# Just the *default* passed to fetch_imgw_meteo_warnings() below -- overridden per
+# deployment via [Alerts_Service] imgw_meteo_teryt_codes (see config.ini.example).
 BIALYSTOK_TERYT = {"2061", "2002"}
 
 IMGW_METEO_WARNINGS_URL = "https://danepubliczne.imgw.pl/api/data/warningsmeteo"
 
 # komunikaty.tvp.pl is RSO's actual backend (see research doc "1a. RSO"); the
-# wojewodztwo slug in the path scopes results to Podlaskie server-side, so no
-# additional area filtering is needed on the response.
-RSO_PODLASKIE_URL = "http://komunikaty.tvp.pl/komunikaty/podlaskie/wszystkie?_format=json"
+# wojewodztwo slug in the path scopes results server-side, so no additional area
+# filtering is needed on the response. The slug is filled in by
+# fetch_rso_alerts() below -- default "podlaskie", overridden per deployment via
+# [Alerts_Service] rso_wojewodztwo (see config.ini.example).
+RSO_URL_TEMPLATE = "http://komunikaty.tvp.pl/komunikaty/{wojewodztwo}/wszystkie?_format=json"
 
 GIOS_AQINDEX_URL = "https://api.gios.gov.pl/pjp-api/v1/rest/aqindex/getIndex/{station_id}"
 
@@ -90,8 +94,15 @@ def _normalize(
     }
 
 
-def fetch_imgw_meteo_warnings() -> list[dict[str, Any]]:
-    """Live IMGW meteorological warnings, filtered to ones whose teryt[] touches Bialystok.
+def fetch_imgw_meteo_warnings(
+    teryt_codes: set[str] = BIALYSTOK_TERYT,
+    area_label: str = "Bialystok / powiat bialostocki",
+) -> list[dict[str, Any]]:
+    """Live IMGW meteorological warnings (nationwide), filtered to ones whose
+    teryt[] intersects teryt_codes. Defaults preserve the original Bialystok
+    behavior; pass a different set to monitor another city/powiat -- see
+    [Alerts_Service] imgw_meteo_teryt_codes in config.ini.example for how to
+    look up TERYT codes for another area.
 
     Raises requests.RequestException / ValueError on network/parse failure — callers
     are expected to catch and log, same as EarthquakeService._check_earthquakes does
@@ -119,7 +130,7 @@ def fetch_imgw_meteo_warnings() -> list[dict[str, Any]]:
     records = []
     for w in warnings:
         teryt = set(w.get("teryt") or [])
-        if not teryt & BIALYSTOK_TERYT:
+        if not teryt & teryt_codes:
             continue
         records.append(
             _normalize(
@@ -127,7 +138,7 @@ def fetch_imgw_meteo_warnings() -> list[dict[str, Any]]:
                 external_id=w.get("id"),
                 type_="weather",
                 severity=w.get("stopien"),
-                area="Bialystok / powiat bialostocki",
+                area=area_label,
                 title=w.get("nazwa_zdarzenia"),
                 description=w.get("tresc"),
                 published_at=w.get("opublikowano"),
@@ -139,18 +150,21 @@ def fetch_imgw_meteo_warnings() -> list[dict[str, Any]]:
     return records
 
 
-def fetch_rso_podlaskie() -> list[dict[str, Any]]:
-    """Live RSO (Regionalny System Ostrzegania) alerts for wojewodztwo podlaskie.
+def fetch_rso_alerts(wojewodztwo: str = "podlaskie") -> list[dict[str, Any]]:
+    """Live RSO (Regionalny System Ostrzegania) alerts for the given wojewodztwo.
 
     Includes Alert RCB messages, which RSO republishes tagged with a title like
     "ALERT RCB - ..." (see research doc "1b. Alert RCB" — there is no standalone
-    live RCB feed, this is the practical integration point for it).
+    live RCB feed, this is the practical integration point for it). Default
+    preserves the original Podlaskie behavior; pass a different wojewodztwo slug
+    to monitor another region -- see [Alerts_Service] rso_wojewodztwo in
+    config.ini.example for the full list of valid slugs.
 
     Raises requests.RequestException / ValueError on network/parse failure — callers
     are expected to catch and log.
     """
     resp = requests.get(
-        RSO_PODLASKIE_URL,
+        RSO_URL_TEMPLATE.format(wojewodztwo=wojewodztwo),
         headers={"User-Agent": USER_AGENT},
         timeout=TIMEOUT,
     )
@@ -161,7 +175,9 @@ def fetch_rso_podlaskie() -> list[dict[str, Any]]:
     for item in data.get("newses", []):
         item_id = item.get("id")
         provinces = item.get("provinces") or {}
-        area = ", ".join(p.get("name", "") for p in provinces.values() if p.get("name")) or "Podlaskie"
+        area = (
+            ", ".join(p.get("name", "") for p in provinces.values() if p.get("name")) or wojewodztwo.title()
+        )
         records.append(
             _normalize(
                 source="rso",
