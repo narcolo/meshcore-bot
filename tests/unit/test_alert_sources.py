@@ -388,3 +388,22 @@ class TestFetchPaaRadiation:
         ):
             readings = alert_sources.fetch_paa_radiation(["Nonexistent Station"])
         assert readings == []
+
+    def test_custom_bbox_is_used_in_the_request(self):
+        """bbox is the actual portability knob -- a deployment monitoring
+        stations outside Podlaskie passes its own box instead of the default."""
+        custom_bbox = "14.0,49.0,24.2,55.0,EPSG:4326"
+        with patch(
+            "modules.clients.alert_sources.requests.get",
+            return_value=_mock_response(PAA_WFS_RESPONSE),
+        ) as mock_get:
+            alert_sources.fetch_paa_radiation(["Suwalki"], bbox=custom_bbox)
+        assert mock_get.call_args.kwargs["params"]["bbox"] == custom_bbox
+
+    def test_default_bbox_is_the_podlaskie_box(self):
+        with patch(
+            "modules.clients.alert_sources.requests.get",
+            return_value=_mock_response(PAA_WFS_RESPONSE),
+        ) as mock_get:
+            alert_sources.fetch_paa_radiation(["Suwalki"])
+        assert mock_get.call_args.kwargs["params"]["bbox"] == alert_sources.PAA_PODLASKIE_BBOX

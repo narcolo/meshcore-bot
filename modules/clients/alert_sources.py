@@ -50,6 +50,8 @@ PAA_USER_AGENT = (
 # Loose bounding box covering wojewodztwo podlaskie and its immediate neighbors --
 # wide enough that any plausibly-configured station name is included regardless of
 # its exact coordinates, while still avoiding a full-Poland (62-station) payload.
+# Just the *default* passed to fetch_paa_radiation() below -- overridden per
+# deployment via [Alerts_Service] paa_bbox (see config.ini.example).
 PAA_PODLASKIE_BBOX = "21.5,52.0,24.5,54.5,EPSG:4326"
 
 _PAA_VALUE_RE = re.compile(r"^([\d.]+)\s*(\S+)$")
@@ -225,12 +227,17 @@ def fetch_gios_aqindex(station_id: int) -> Optional[dict[str, Any]]:
     }
 
 
-def fetch_paa_radiation(station_names: list[str]) -> list[dict[str, Any]]:
+def fetch_paa_radiation(station_names: list[str], bbox: str = PAA_PODLASKIE_BBOX) -> list[dict[str, Any]]:
     """Live PAA radiation dose-rate readings for the given station names.
 
     Only stations whose "stacja" name case-insensitively matches one of
     station_names are returned; a configured name absent from the response is
     simply missing from the result (callers should log if that's unexpected).
+    `bbox` limits which stations the WFS query even considers -- a station
+    outside it is never returned regardless of station_names, so a deployment
+    monitoring stations outside Podlaskie must widen this too (default
+    preserves current behavior) -- see [Alerts_Service] paa_bbox in
+    config.ini.example for how to compute one for another region.
 
     Raises requests.RequestException / ValueError on network/parse failure.
     """
@@ -243,7 +250,7 @@ def fetch_paa_radiation(station_names: list[str]) -> list[dict[str, Any]]:
             "request": "GetFeature",
             "typeNames": "paa:kcad_siec_pms_moc_dawki_mapa",
             "outputFormat": "application/json",
-            "bbox": PAA_PODLASKIE_BBOX,
+            "bbox": bbox,
         },
         headers={"User-Agent": PAA_USER_AGENT},
         timeout=TIMEOUT,
