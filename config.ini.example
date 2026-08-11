@@ -2245,6 +2245,15 @@ imgw_meteo_max_alerts_per_hour = 12
 # was recently published.
 imgw_meteo_max_age_hours = 24
 
+# Message template: either a preset name or a custom format string. Empty = compact.
+# Presets: compact (default), minimal ("⚠️ {title} st.{severity}"), detailed (compact +
+# full description on a second line). Available placeholders: prefix, title, severity,
+# date, until, description, date_part, until_part -- the last two are pre-built by the
+# code (" [10.08]"/" — until ..." or "" when absent) so a custom template referencing
+# them never ends up with a dangling "[]" when a warning has no date/expiry, e.g.
+# compact's actual string is "⚠️ {prefix}: {title} (st.{severity}){date_part}{until_part}".
+imgw_meteo_template =
+
 # --- RSO (Regionalny System Ostrzegania), wojewodztwo podlaskie ---
 # Also carries republished Alert RCB messages -- there is no standalone live RCB
 # feed (see research doc), so this is the practical integration point for those too.
@@ -2264,6 +2273,13 @@ rso_max_alerts_per_hour = 12
 # Skip alerts published longer ago than this many hours (same stale-dedup-reset
 # guard as imgw_meteo_max_age_hours above)
 rso_max_age_hours = 24
+
+# Message template: either a preset name or a custom format string. Empty = compact.
+# Presets: compact (default), minimal ("📢 {title}"), title_only ("📢 {prefix}: {title}",
+# no description). Placeholders: prefix, title, date, description, date_part,
+# description_part -- the last two are pre-built (" [10.08]"/" — full text" or "" when
+# absent), e.g. compact's actual string is "📢 {prefix}{date_part}: {title}{description_part}".
+rso_template =
 
 # --- GIOS air quality (Phase 2b) ---
 # Unlike IMGW/RSO (discrete events), this is a continuous measurement -- it alerts
@@ -2286,6 +2302,12 @@ gios_alert_category = Zły
 
 # Minimum hours between repeat "still elevated" reminders while above threshold
 gios_renotify_hours = 6
+
+# Message template: either a preset name or a custom format string. Empty = compact.
+# Presets: compact (default), minimal ("{icon} {category}"). Placeholders: icon, prefix,
+# category, date, date_part (pre-built " [10.08]" or "" when absent) -- compact's actual
+# string is "{icon} {prefix}: {category}{date_part}".
+gios_template =
 
 # --- PAA radiation monitoring (Phase 2b) ---
 # Unlike GIOS above (threshold-crossing), this is a scheduled digest: at each
@@ -2316,6 +2338,12 @@ paa_alert_dose_rate_usvh = 0.3
 # for a station older than this many hours (Bialystok's own station was observed 6
 # days stale during research -- some PAA stations lag badly)
 paa_max_reading_age_hours = 6
+
+# Message template: either a preset name or a custom format string. Empty = compact.
+# Preset: compact (default -- "☢️ {prefix} [{when}]: {stations} {unit}"). `stations` is
+# a single pre-joined "Name: value(marker), Name2: value2" list -- not independently
+# templated per station, to avoid two-level template composition for one digest.
+paa_template =
 [Worldcup_Service]
 # Live FIFA World Cup score updates posted to a channel (true/false).
 # Posts proactive messages as matches progress, e.g.:
