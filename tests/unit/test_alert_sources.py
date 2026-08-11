@@ -8,6 +8,7 @@ plans/alert-feeds-research.md -- no network calls are made (requests.get is mock
 from unittest.mock import Mock, patch
 
 import pytest
+import requests
 
 from modules.clients import alert_sources
 
@@ -76,8 +77,17 @@ RSO_RESPONSE = {
 
 def _mock_response(payload):
     resp = Mock()
+    resp.status_code = 200
     resp.json.return_value = payload
     resp.raise_for_status = Mock()
+    return resp
+
+
+def _mock_404_response(payload):
+    resp = Mock()
+    resp.status_code = 404
+    resp.json.return_value = payload
+    resp.raise_for_status = Mock(side_effect=requests.exceptions.HTTPError("404 Client Error"))
     return resp
 
 
@@ -131,6 +141,30 @@ class TestFetchImgwMeteoWarnings:
         ):
             records = alert_sources.fetch_imgw_meteo_warnings()
         assert records == []
+
+    def test_404_with_no_products_found_means_zero_warnings_not_a_failure(self):
+        """IMGW returns HTTP 404 (not 200 + []) with {"status": false, "message":
+        "No products were found"} when there are currently zero active warnings
+        nationwide -- confirmed live 2026-08-11. Must be treated as an empty
+        result, not raise (the earlier bug: this was surfacing as a spurious
+        "IMGW warnings request failed" every poll while no warnings existed)."""
+        with patch(
+            "modules.clients.alert_sources.requests.get",
+            return_value=_mock_404_response({"status": False, "message": "No products were found"}),
+        ):
+            records = alert_sources.fetch_imgw_meteo_warnings()
+        assert records == []
+
+    def test_404_with_a_different_body_still_raises(self):
+        """A 404 for some other reason (endpoint moved, bad request, ...) must
+        not be silently swallowed -- only the specific known empty-result body
+        is treated as non-fatal."""
+        with patch(
+            "modules.clients.alert_sources.requests.get",
+            return_value=_mock_404_response({"error": "not found"}),
+        ):
+            with pytest.raises(requests.exceptions.HTTPError):
+                alert_sources.fetch_imgw_meteo_warnings()
 
 
 @pytest.mark.unit
