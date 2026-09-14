@@ -1241,12 +1241,12 @@
     "routing_hint": {
       "description": "Powiadamia użytkowników kanału Public o routingu 1-bajtowym i prosi o zmianę na 2-bajtowy",
       "hint_part1": "Hej @[{name}], twój węzeł używa routingu 1-bajtowego. Zmień na 2-bajtowy.",
-      "hint_part2": "Ekran główny -> zębatka -> Experimental settings -> Default Path Hash Size -> 2-byte"
+      "hint_part2": "Ekran główny -> zębatka -> Network Settings -> Domyślny rozmiar hasha ścieżki -> 2-byte"
     },
     "scope_hint": {
       "description": "Ostrzega nadawców na skonfigurowanym kanale wysyłających wiadomości bez zakresu, by włączyli region",
       "hint": "Hej @[{name}], włącz region {scope} - wiadomości bez zakresu będą odrzucane.",
-      "hint_short": "Włącz region {scope} - wiadomości bez zakresu będą odrzucane."
+      "hint_short": "Włącz region {scope} - wiadomości bez zakresu będą odrzucane. Network Settings -> Domyślny zakres regionu."
     },
     "mention": {
       "description": "Odpowiada w stylu Bendera gdy ktoś wywołuje tylko nazwę bota",
