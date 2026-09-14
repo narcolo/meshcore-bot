@@ -33,8 +33,9 @@ dependencies = [
     "maidenhead>=1.4.0",
     "pytz>=2023.3",
     "aiohttp>=3.8.0",
-    # 2.3.8+ required for zero-hop neighbour discovery (see requirements.txt)
-    "meshcore>=2.3.8",
+    # Pinned exactly to 2.3.8 -- see requirements.txt for why (2.3.10 regression:
+    # DTR toggle on serial connect can drop ESP32 boards into bootloader mode)
+    "meshcore==2.3.8",
     "openmeteo-requests>=1.7.2",
     "requests-cache>=1.1.1",
     "retry-requests>=1.0.0",
