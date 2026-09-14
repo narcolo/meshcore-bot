@@ -13,9 +13,19 @@ geopy>=2.3.0
 maidenhead>=1.4.0
 pytz>=2023.3
 aiohttp>=3.8.0
-# 2.3.8+ is required, not merely preferred: send_node_discover_req / req_regions_sync
-# (zero-hop neighbour discovery) and the bounded, serialised BLE write both landed there.
-meshcore>=2.3.8
+# 2.3.8 exactly, not >=2.3.8: send_node_discover_req / req_regions_sync (zero-hop
+# neighbour discovery) and the bounded, serialised BLE write both landed at 2.3.8,
+# so we can't go lower. But 2.3.10 (serial_cx.py) added an unconditional
+# `transport.serial.dtr = False` on every serial connect, alongside the existing
+# `rts = False`. On boards where DTR/RTS are wired through the standard
+# esptool-style auto-reset circuit (EN + GPIO0), toggling both together can pulse
+# the chip into UART bootloader/download mode instead of a normal boot -- a
+# silent regression (2026-09-14) that reproduced as "No response from meshcore
+# node" on serial-connected companions even though the device was otherwise
+# healthy (confirmed alive and forwarding mesh traffic when probed outside the
+# meshcore-py connection path). Pinned exactly until upstream fixes/reverts this;
+# unpin only after confirming the DTR toggle is removed or made opt-in.
+meshcore==2.3.8
 openmeteo-requests>=1.7.2
 requests-cache>=1.1.1
 retry-requests>=1.0.0
