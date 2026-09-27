@@ -278,3 +278,13 @@ Schedule keys are parsed by **APScheduler** `CronTrigger.from_crontab` (plus `@`
 Prefer **`mon`–`sun`** names in the DOW field so expressions stay unambiguous. Example: Monday 12:30 is `30 12 * * mon` or `30 12 * * 0` — **not** Vixie’s `30 12 * * 1` (that is Tuesday here).
 
 Preset aliases expand to those same APScheduler forms. In particular **`@weekly`** is Monday 00:00 (`0 0 * * 0`), not Sunday midnight as on many Unix crons.
+
+## Daily Public Notice (`[Daily_Public_Notice]`)
+
+A scheduled onboarding notice for new MeshCore users — not a user-triggered command. It fires once a day at `time` (`HH:MM`, 24h), interpreted using the same `[Bot] timezone` handling as everything else in this scheduler, and reuses the same APScheduler/config-reload machinery as `[Scheduled_Messages]` (a `reload` picks up a changed `time` without a restart, and never creates duplicate jobs).
+
+Each `message.N` (`message.1`, `message.2`, ...) is sent in ascending numeric order to `channel`, using `flood_scope` as the Region Scope for the *outgoing* send — independent of `recommended_scopes`, which is only the list shown to newcomers. `message_delay_seconds` is waited between messages (not after the last one), since mesh delivery can reorder back-to-back sends.
+
+Any `message.N` containing `{scopes}` gets `recommended_scopes` rendered into it, in configured order (e.g. `pl, pl-podlasie, pl-bia`). If the full list would push a message over `max_message_bytes` (a UTF-8 byte count, not a character count), trailing scopes are dropped one at a time — never partially truncated — until it fits. If a message still cannot fit `max_message_bytes` after that reduction (or a fixed, non-`{scopes}` message is simply too long), the entire notice batch is skipped for that run and a clear error is logged; a truncated or partial batch is never sent.
+
+Enabling this for the Public channel requires the same `[Bot]` override as `monitor_channels` on the Public channel (see above).

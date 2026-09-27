@@ -1507,6 +1507,50 @@ defer_to_human_greeting = false
 # 0 = exact match only (default). 1-3 = allow small typos/variants in sender names.
 levenshtein_distance = 0
 
+[Daily_Public_Notice]
+# Periodic onboarding notice for new MeshCore users: a short scheduled
+# announcement telling newcomers which Region Scopes to configure and where
+# to find more information. This is a proactive scheduled send, not a
+# user-triggered command. Enabling this for the Public channel ALSO requires
+# the override below in [Bot]:
+#   i_understand_that_running_the_bot_on_the_public_channel_is_potentially_disruptive_to_other_users_enjoyment_of_the_mesh_and_i_would_like_to_do_it_anyway = true
+enabled = false
+
+# Daily local time (HH:MM, 24h) the notice fires, interpreted using the
+# [Bot] timezone setting (falls back to system timezone if unset/invalid).
+time = 19:00
+
+# Channel the notice is sent to.
+channel = Public
+
+# Region Scope (e.g. "pl-podlasie" or "#pl-podlasie"; a missing '#' is added) the OUTGOING notice
+# itself is sent with. Empty/"*"/"0"
+# means global flood. This is independent of recommended_scopes below.
+flood_scope = pl-podlasie
+
+# Scopes recommended to newcomers, in priority order (highest priority
+# first). Rendered into any message.N text containing the {scopes}
+# placeholder as "pl, pl-podlasie, pl-bia". If the full list would not fit
+# within max_message_bytes, trailing scopes are dropped (never partially
+# truncated) until the message fits.
+recommended_scopes = pl,pl-podlasie,pl-bia
+
+# Maximum UTF-8 byte size allowed for each rendered message.N. A message
+# that cannot fit (even after {scopes} reduction) is never sent — the whole
+# notice batch is skipped for that run and an error is logged.
+max_message_bytes = 120
+
+# Delay between consecutive messages in the same notice batch (no delay
+# after the last message). Messages can arrive out of order over the mesh,
+# so a real gap between them is intentional.
+message_delay_seconds = 5
+
+# Messages are sent in ascending numeric order (message.1, message.2, ...).
+# Add as many message.N entries as needed. {scopes} expands to
+# recommended_scopes above, in configured order.
+message.1 = Nowy w MeshCore? Ustaw scope: {scopes}.
+message.2 = Więcej informacji: https://meshcore.podlasie.pl
+
 [Routing_Hint_Command]
 # Notify Public-channel users who are transmitting with 1-byte routing to switch to 2-byte.
 # The bot sends two short messages; text comes from the active language translation file.

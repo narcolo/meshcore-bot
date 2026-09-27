@@ -418,3 +418,66 @@ class TestGetCommandPrefixToSection:
         for _k, v in result.items():
             assert v.endswith("_Command")
 
+
+class TestDailyPublicNoticeValidation:
+    """Daily_Public_Notice guard: same Public-channel override as monitor_channels."""
+
+    BASE = """[Connection]
+connection_type = serial
+serial_port = /dev/ttyUSB0
+
+[Bot]
+bot_name = TestBot
+db_path = {db_path}
+{bot_extra}
+
+[Channels]
+monitor_channels = general
+respond_to_dms = true
+
+[Keywords]
+test = ack
+
+[Daily_Public_Notice]
+enabled = {enabled}
+channel = {channel}
+time = 19:00
+flood_scope = pl-podlasie
+recommended_scopes = pl,pl-podlasie,pl-bia
+max_message_bytes = 120
+message_delay_seconds = 5
+message.1 = Ustaw scope: {{scopes}}.
+message.2 = Wiecej informacji: https://meshcore.podlasie.pl
+"""
+
+    def _validate(self, tmp_path, enabled="true", channel="general", bot_extra=""):
+        config = tmp_path / "config.ini"
+        config.write_text(self.BASE.format(
+            db_path=str(tmp_path / "meshcore_bot.db"),
+            enabled=enabled, channel=channel, bot_extra=bot_extra,
+        ))
+        return validate_config(str(config))
+
+    def test_disabled_section_is_clean(self, tmp_path):
+        results = self._validate(tmp_path, enabled="false", channel="Public")
+        errors = [r for r in results if r[0] == SEVERITY_ERROR]
+        assert not any("Daily_Public_Notice" in r[1] for r in errors)
+
+    def test_enabled_on_public_without_override_errors(self, tmp_path):
+        results = self._validate(tmp_path, channel="Public")
+        errors = [r for r in results if r[0] == SEVERITY_ERROR]
+        assert any("Daily_Public_Notice" in r[1] and "Public" in r[1] for r in errors)
+
+    def test_enabled_on_public_with_override_ok(self, tmp_path):
+        from modules.config_validation import PUBLIC_CHANNEL_OVERRIDE_KEY
+        results = self._validate(
+            tmp_path, channel="Public",
+            bot_extra=f"{PUBLIC_CHANNEL_OVERRIDE_KEY} = true",
+        )
+        errors = [r for r in results if r[0] == SEVERITY_ERROR]
+        assert not any("Daily_Public_Notice" in r[1] for r in errors)
+
+    def test_enabled_on_normal_channel_is_clean(self, tmp_path):
+        results = self._validate(tmp_path, channel="general")
+        errors = [r for r in results if r[0] == SEVERITY_ERROR]
+        assert not any("Daily_Public_Notice" in r[1] for r in errors)

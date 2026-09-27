@@ -285,6 +285,192 @@ class TestSetupScheduledMessages:
 
 
 # ---------------------------------------------------------------------------
+# TestDailyPublicNotice — scheduling
+# ---------------------------------------------------------------------------
+
+
+def _cron_field(trigger, name):
+    for f in trigger.fields:
+        if f.name == name:
+            return str(f)
+    raise KeyError(name)
+
+
+class TestDailyPublicNoticeScheduling:
+    def _teardown(self, scheduler):
+        if scheduler._apscheduler is not None:
+            try:
+                scheduler._apscheduler.shutdown(wait=False)
+            except Exception:
+                pass
+
+    def _add_section(self, scheduler, **overrides):
+        values = {
+            "enabled": "true",
+            "time": "19:00",
+            "channel": "general",
+            "flood_scope": "pl-podlasie",
+            "recommended_scopes": "pl,pl-podlasie,pl-bia",
+            "max_message_bytes": "120",
+            "message_delay_seconds": "5",
+            "message.1": "Ustaw scope: {scopes}.",
+            "message.2": "Więcej informacji: https://meshcore.podlasie.pl",
+        }
+        values.update(overrides)
+        scheduler.bot.config.add_section("Daily_Public_Notice")
+        for key, value in values.items():
+            if value is None:
+                continue
+            scheduler.bot.config.set("Daily_Public_Notice", key, value)
+
+    def _notice_job(self, scheduler):
+        return scheduler._apscheduler.get_job("daily_public_notice")
+
+    def test_enabled_schedules_job(self, scheduler):
+        self._add_section(scheduler)
+        scheduler.setup_scheduled_messages()
+        job = self._notice_job(scheduler)
+        assert job is not None
+        self._teardown(scheduler)
+
+    def test_disabled_does_not_schedule_job(self, scheduler):
+        self._add_section(scheduler, enabled="false")
+        scheduler.setup_scheduled_messages()
+        assert self._notice_job(scheduler) is None
+        self._teardown(scheduler)
+
+    def test_missing_section_does_not_schedule_job(self, scheduler):
+        scheduler.setup_scheduled_messages()
+        assert self._notice_job(scheduler) is None
+        self._teardown(scheduler)
+
+    def test_custom_time_used_for_trigger(self, scheduler):
+        self._add_section(scheduler, time="07:30")
+        scheduler.setup_scheduled_messages()
+        job = self._notice_job(scheduler)
+        assert _cron_field(job.trigger, "hour") == "7"
+        assert _cron_field(job.trigger, "minute") == "30"
+        self._teardown(scheduler)
+
+    def test_default_time_used_for_trigger(self, scheduler):
+        self._add_section(scheduler)
+        scheduler.setup_scheduled_messages()
+        job = self._notice_job(scheduler)
+        assert _cron_field(job.trigger, "hour") == "19"
+        assert _cron_field(job.trigger, "minute") == "0"
+        self._teardown(scheduler)
+
+    def test_uses_bot_timezone(self, scheduler):
+        scheduler.bot.config.set("Bot", "timezone", "America/Los_Angeles")
+        self._add_section(scheduler)
+        scheduler.setup_scheduled_messages()
+        job = self._notice_job(scheduler)
+        assert str(job.trigger.timezone) == "America/Los_Angeles"
+        self._teardown(scheduler)
+
+    def test_reload_does_not_duplicate_job(self, scheduler):
+        self._add_section(scheduler)
+        scheduler.setup_scheduled_messages()
+        scheduler.setup_scheduled_messages()
+        jobs = [j for j in scheduler._apscheduler.get_jobs() if j.id == "daily_public_notice"]
+        assert len(jobs) == 1
+        self._teardown(scheduler)
+
+    def test_public_channel_without_override_is_not_scheduled(self, scheduler):
+        self._add_section(scheduler, channel="Public")
+        scheduler.setup_scheduled_messages()
+        assert self._notice_job(scheduler) is None
+        scheduler.bot.logger.error.assert_called()
+        self._teardown(scheduler)
+
+    def test_public_channel_with_override_is_scheduled(self, scheduler):
+        from modules.config_validation import PUBLIC_CHANNEL_OVERRIDE_KEY
+        scheduler.bot.config.set("Bot", PUBLIC_CHANNEL_OVERRIDE_KEY, "true")
+        self._add_section(scheduler, channel="Public")
+        scheduler.setup_scheduled_messages()
+        assert self._notice_job(scheduler) is not None
+        self._teardown(scheduler)
+
+    def test_invalid_config_is_not_scheduled(self, scheduler):
+        self._add_section(scheduler, time="not-a-time")
+        scheduler.setup_scheduled_messages()
+        assert self._notice_job(scheduler) is None
+        self._teardown(scheduler)
+
+
+# ---------------------------------------------------------------------------
+# TestDailyPublicNotice — sending
+# ---------------------------------------------------------------------------
+
+
+class TestDailyPublicNoticeSending:
+    def _cfg(self, **kwargs):
+        from modules.daily_public_notice import DailyPublicNoticeConfig
+        defaults = dict(
+            hour=19, minute=0, channel="general", flood_scope="pl-podlasie",
+            recommended_scopes=("pl", "pl-podlasie", "pl-bia"),
+            max_message_bytes=120, message_delay_seconds=5.0,
+            message_templates=("First {scopes}", "Second"),
+        )
+        defaults.update(kwargs)
+        return DailyPublicNoticeConfig(**defaults)
+
+    async def test_sends_to_configured_channel_and_scope(self, scheduler):
+        scheduler.bot.command_manager.send_channel_message = AsyncMock(return_value=True)
+        cfg = self._cfg(message_templates=("Only message",))
+        with patch("modules.scheduler.asyncio.sleep", new_callable=AsyncMock):
+            await scheduler._send_daily_public_notice_coro(cfg)
+        scheduler.bot.command_manager.send_channel_message.assert_awaited_once_with(
+            "general", "Only message", scope="pl-podlasie", skip_user_rate_limit=True,
+        )
+
+    async def test_sends_messages_in_numeric_order(self, scheduler):
+        sent = []
+
+        async def fake_send(channel, text, **kwargs):
+            sent.append(text)
+            return True
+
+        scheduler.bot.command_manager.send_channel_message = AsyncMock(side_effect=fake_send)
+        cfg = self._cfg(message_templates=("Ustaw scope: {scopes}.", "Więcej informacji: url"))
+        with patch("modules.scheduler.asyncio.sleep", new_callable=AsyncMock):
+            await scheduler._send_daily_public_notice_coro(cfg)
+        assert sent == ["Ustaw scope: pl, pl-podlasie, pl-bia.", "Więcej informacji: url"]
+
+    async def test_waits_configured_delay_between_messages(self, scheduler):
+        scheduler.bot.command_manager.send_channel_message = AsyncMock(return_value=True)
+        cfg = self._cfg(message_templates=("One", "Two"), message_delay_seconds=5.0)
+        with patch("modules.scheduler.asyncio.sleep", new_callable=AsyncMock) as sleep_mock:
+            await scheduler._send_daily_public_notice_coro(cfg)
+        sleep_mock.assert_awaited_once_with(5.0)
+
+    async def test_does_not_wait_after_last_message(self, scheduler):
+        scheduler.bot.command_manager.send_channel_message = AsyncMock(return_value=True)
+        cfg = self._cfg(message_templates=("Only one",), message_delay_seconds=5.0)
+        with patch("modules.scheduler.asyncio.sleep", new_callable=AsyncMock) as sleep_mock:
+            await scheduler._send_daily_public_notice_coro(cfg)
+        sleep_mock.assert_not_awaited()
+
+    async def test_zero_delay_never_sleeps(self, scheduler):
+        scheduler.bot.command_manager.send_channel_message = AsyncMock(return_value=True)
+        cfg = self._cfg(message_templates=("One", "Two"), message_delay_seconds=0.0)
+        with patch("modules.scheduler.asyncio.sleep", new_callable=AsyncMock) as sleep_mock:
+            await scheduler._send_daily_public_notice_coro(cfg)
+        sleep_mock.assert_not_awaited()
+
+    async def test_invalid_render_skips_sending_entirely(self, scheduler):
+        scheduler.bot.command_manager.send_channel_message = AsyncMock(return_value=True)
+        cfg = self._cfg(max_message_bytes=1, message_templates=("way too long to fit",))
+        await scheduler._send_daily_public_notice_coro(cfg)
+        scheduler.bot.command_manager.send_channel_message.assert_not_awaited()
+
+    async def test_job_sync_skips_when_config_now_invalid(self, scheduler):
+        scheduler.bot.main_event_loop = None  # would be needed only if it got that far
+        scheduler._daily_public_notice_job_sync()  # no [Daily_Public_Notice] section at all
+        # No exception, and nothing scheduled onto a (nonexistent) main loop.
+
+
+# ---------------------------------------------------------------------------
 # TestSetupIntervalAdvertising
 # ---------------------------------------------------------------------------
 
