@@ -21,6 +21,8 @@ class JokeCommand(BaseCommand):
     """Handles joke commands with category support"""
 
     # Plugin metadata
+    # Read-only informational output; safe for scheduled {cmd:...} rendering.
+    render_safe = True
     name = "joke"
     keywords = ['joke', 'jokes']
     description = "Get a random joke or joke from specific category (usage: joke [category])"
@@ -151,8 +153,13 @@ class JokeCommand(BaseCommand):
         Returns:
             bool: True if a joke keyword matches, False otherwise.
         """
-        content_lower = self.cleanup_message_for_matching(message)
-        return any(content_lower == keyword or content_lower.startswith(keyword + ' ') for keyword in self.keywords)
+        return self._cleaned_content_matches(
+            message,
+            lambda content_lower: any(
+                content_lower == keyword or content_lower.startswith(keyword + ' ')
+                for keyword in self.keywords
+            ),
+        )
 
     def can_execute(self, message: MeshMessage, skip_channel_check: bool = False) -> bool:
         """Override to add custom checks (joke_enabled, dark joke) while using base class cooldown"""

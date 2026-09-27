@@ -10,6 +10,24 @@ from typing import Any, Optional
 # Firmware reserves extra bytes for regional (non-global) TC_FLOOD scope on channel text.
 CHANNEL_REGIONAL_FLOOD_SCOPE_BODY_OVERHEAD = 10
 
+# A DM carries no username prefix, so the whole cipher block is body.
+DM_BODY_LIMIT = 158
+
+
+def channel_body_limit(username: Optional[str]) -> int:
+    """Global-scope body budget in UTF-8 bytes for a channel message from ``username``.
+
+    Channel messages go out as ``"<username>: <body>"``, so the budget is the
+    160-byte cipher block minus the name and the ``": "``. Regional scope costs
+    a further ``CHANNEL_REGIONAL_FLOOD_SCOPE_BODY_OVERHEAD``, which callers
+    subtract themselves once they know the outgoing scope.
+
+    Shared by the command layer and the web viewer, which computes the same
+    number in a process that has no bot object.
+    """
+    name = str(username or "Bot")
+    return max(130, 160 - len(name.encode("utf-8")) - 2)
+
 
 @dataclass
 class MeshMessage:
@@ -27,15 +45,9 @@ class MeshMessage:
     elapsed: Optional[str] = None
     # When set from RF routing: path_nodes, path_hex, bytes_per_hop, path_length, route_type, etc.
     routing_info: Optional[dict[str, Any]] = None
-    # Matched flood scope for the reply in hash-less display form
-    # (e.g. "pl-podlasie"), None means global flood
+    # Matched flood scope for the reply in canonical '#'-prefixed form
+    # (e.g. "#pl-podlasie"), None means global flood
     reply_scope: Optional[str] = None
-    # True when this channel message arrived as scoped TC_FLOOD, False when it
-    # arrived as plain unscoped FLOOD, None when unknown: RF correlation failed,
-    # matched only at sender level (pubkey) or via the most-recent fallback, or
-    # route type was DIRECT/TRANSPORT_DIRECT. Only packet-level correlation may
-    # set this. Do not infer scope status from reply_scope.
-    is_scoped_flood: Optional[bool] = None
     # Lowercased content set by base_command.cleanup_message_for_matching
     content_lower: str = ""
     # Transient flag: True once CommandManager.check_keywords has stripped the
@@ -43,6 +55,18 @@ class MeshMessage:
     # cleanup_message_for_matching from re-stripping/re-rejecting an already-normalized
     # message, which previously broke matching for all-but-the-first command.
     prefix_normalized: bool = False
+    # Transient: when not None, CommandManager.send_response appends the reply here
+    # and transmits nothing. Set by CommandManager.render_command_output so a command
+    # can be run for its text alone (e.g. a {cmd:...} placeholder in a scheduled
+    # message) without spending airtime. A synthetic message only.
+    capture_sink: Optional[list[str]] = None
+    # On-air body at construction. Mention/prefix cleanup may rewrite ``content``
+    # for command matching; display and web-viewer capture must use this snapshot.
+    original_content: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.original_content:
+            self.original_content = self.content
 
     def effective_outgoing_flood_scope(self, bot: Any) -> str:
         """Resolve outbound flood scope the same way as ``CommandManager.send_channel_message``.

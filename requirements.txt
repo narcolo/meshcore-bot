@@ -25,6 +25,20 @@ aiohttp>=3.8.0
 # healthy (confirmed alive and forwarding mesh traffic when probed outside the
 # meshcore-py connection path). Pinned exactly until upstream fixes/reverts this;
 # unpin only after confirming the DTR toggle is removed or made opt-in.
+#
+# Upstream (2026-09-27 merge) wants >=2.3.14 instead, for a real, unrelated fix:
+# before 2.3.13, send_msg_with_retry reported ACKed DMs as failures (subscribed
+# to the ACK only after send_msg returned, and each attempt accepted only its
+# own ACK code, so an ACK arriving right behind MSG_SENT or answering an earlier
+# attempt was ignored -- meshcore_py#108); 2.3.14 also fixes send_cmd's
+# destination-type handling. NOT taken here without testing on real hardware
+# first: 2.3.14's create_serial() changes dtr from 2.3.10's forced False to a
+# configurable parameter defaulting to True -- our call site (core.py,
+# create_serial()) does not pass dtr, so upgrading would silently move from
+# "dtr untouched" (2.3.8) to "dtr asserted True" (2.3.14 default), which is a
+# third, unverified state on the affected boards -- not simply a revert of the
+# known-bad 2.3.10 behavior. Re-evaluate after confirming on the actual
+# serial-connected companions.
 meshcore==2.3.8
 openmeteo-requests>=1.7.2
 requests-cache>=1.1.1

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "meshcore-bot"
-version = "1.0.0"
+version = "1.1.0"
 description = "MeshCore Bot with commands for mesh testing, utilities, and service integration."
 readme = "README.md"
 # Table form rather than the SPDX string form: the string form needs
@@ -34,7 +34,11 @@ dependencies = [
     "pytz>=2023.3",
     "aiohttp>=3.8.0",
     # Pinned exactly to 2.3.8 -- see requirements.txt for why (2.3.10 regression:
-    # DTR toggle on serial connect can drop ESP32 boards into bootloader mode)
+    # DTR toggle on serial connect can drop ESP32 boards into bootloader mode).
+    # Upstream now requires >=2.3.14 for send_msg_with_retry's ACK handling; NOT
+    # taken here without hardware testing first -- 2.3.14 changes create_serial's
+    # dtr default from 2.3.10's forced False to a configurable True, which is a
+    # different (unverified) state from both 2.3.8 and 2.3.10 on our boards.
     "meshcore==2.3.8",
     "openmeteo-requests>=1.7.2",
     "requests-cache>=1.1.1",
@@ -147,6 +151,7 @@ strict_optional = true
 # New modules written with full type annotations get strict treatment.
 [[tool.mypy.overrides]]
 module = [
+    "modules.alert_format",
     "modules.commands.schedule_command",
     "modules.service_plugins.webhook_service",
     "modules.service_plugins.base_service",
@@ -156,6 +161,7 @@ module = [
     "modules.security_utils",
     "modules.commands.base_command",
     "modules.commands.rain_command",
+    "modules.region_warning",
 ]
 disallow_untyped_defs = true
 disallow_incomplete_defs = true

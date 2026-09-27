@@ -363,7 +363,7 @@ class TestFloodScope:
             [RECORD_A], source._format, send_details=False, max_alerts_per_hour=12, max_age_hours=24,
         )
         _, kwargs = bot.command_manager.send_channel_messages_chunked.call_args
-        assert kwargs["scope"] == "pl-podlasie"
+        assert kwargs["scope"] == "#pl-podlasie"
 
     async def test_empty_flood_scope_passes_none(self):
         bot = _bot()

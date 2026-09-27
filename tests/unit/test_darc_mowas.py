@@ -140,10 +140,10 @@ class TestScopeByRegion:
         info = TRDECapAlertInfo(language="de", category=None, event=None, urgency=None,
             severity=None, certainty=None, description="", parameter=[], headline=None, area=[area])
         # most specific wins
-        assert svc.scope_by_region(info) == "de-by-muc"
+        assert svc.scope_by_region(info) == "#de-by-muc"
         # broader prefix
         area.geocode = [("SHN", "091000000000")]
-        assert svc.scope_by_region(info) == "de-by"
+        assert svc.scope_by_region(info) == "#de-by"
         # no match
         area.geocode = [("SHN", "050000000000")]
         assert svc.scope_by_region(info) is None
