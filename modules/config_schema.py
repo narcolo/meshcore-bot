@@ -103,6 +103,7 @@ DYNAMIC_SUFFIX_KEY_PREFIXES: tuple[tuple[str, str], ...] = (
     ("Weather", "custom.wxsim."),
     ("Weather", "custom.mqtt_weather."),
     ("DARC_MoWaS_Service", "flood_scope."),
+    ("Daily_Public_Notice", "message."),
 )
 
 # Known wrong key names, per section, with the canonical spelling to suggest.
@@ -280,6 +281,15 @@ SECTIONS: dict[str, SectionMeta] = {
     }),
     "Announcements_Command": SectionMeta(dynamic_keys=True),
     "Alert_Command": SectionMeta(dynamic_keys=True),
+    "Daily_Public_Notice": SectionMeta(keys={
+        "enabled": KeyMeta(type="bool", default="true"),
+        "time": KeyMeta(default="19:00"),
+        "channel": KeyMeta(default="Public"),
+        "flood_scope": KeyMeta(default="pl-podlasie"),
+        "recommended_scopes": KeyMeta(default="pl,pl-podlasie,pl-bia"),
+        "max_message_bytes": KeyMeta(type="int", default="120"),
+        "message_delay_seconds": KeyMeta(type="int", default="5"),
+    }),
 }
 
 for _section in DYNAMIC_KEY_SECTIONS:

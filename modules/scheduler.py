@@ -19,9 +19,14 @@ from pathlib import Path
 from typing import Any, Optional
 
 from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
 from meshcore.events import EventType
 
+from .config_validation import PUBLIC_CHANNEL_OVERRIDE_KEY, _channel_name_is_public
+from .daily_public_notice import DailyPublicNoticeConfig
+from .daily_public_notice import load_config as load_daily_public_notice_config
+from .daily_public_notice import render_messages as render_daily_public_notice_messages
 from .flood_scope import scope_key_hex
 from .maintenance import MaintenanceRunner
 from .models import CHANNEL_REGIONAL_FLOOD_SCOPE_BODY_OVERHEAD
@@ -193,6 +198,7 @@ class MessageScheduler:
         self.logger.info(f"APScheduler started with {len(self.scheduled_messages)} scheduled message(s)")
 
         self._setup_device_mode_scheduler_jobs()
+        self._setup_daily_public_notice_job()
 
         # Setup interval-based advertising
         self.setup_interval_advertising()
@@ -248,6 +254,72 @@ class MessageScheduler:
             )
         except Exception as e:
             self.logger.warning('Could not schedule device-mode contact jobs: %s', e)
+
+    def _setup_daily_public_notice_job(self) -> None:
+        """Schedule [Daily_Public_Notice] as a daily APScheduler cron job.
+
+        Config is re-loaded (not just re-validated) at send time too, so a
+        reload always reflects the latest [Daily_Public_Notice] values —
+        this call only decides whether a job should exist right now.
+        """
+        if self._apscheduler is None:
+            return
+        cfg = load_daily_public_notice_config(self.bot.config, logger=self.logger)
+        if cfg is None:
+            return
+
+        if _channel_name_is_public(cfg.channel):
+            override = self.bot.config.get(
+                'Bot', PUBLIC_CHANNEL_OVERRIDE_KEY, fallback=''
+            ).strip().lower()
+            if override != 'true':
+                self.logger.error(
+                    "Daily_Public_Notice is enabled for the Public channel. Running a "
+                    "bot on Public is disruptive to other mesh users. To override, add "
+                    "to [Bot]:\n  %s = true\nDisabling Daily_Public_Notice.",
+                    PUBLIC_CHANNEL_OVERRIDE_KEY,
+                )
+                return
+
+        tz, _ = get_config_timezone(self.bot.config, self.logger)
+        self._apscheduler.add_job(
+            self._daily_public_notice_job_sync,
+            trigger=CronTrigger(hour=cfg.hour, minute=cfg.minute, timezone=tz),
+            id='daily_public_notice',
+            replace_existing=True,
+        )
+        self.logger.info(
+            "Scheduled Daily_Public_Notice: %02d:%02d -> %s (scope=%s)",
+            cfg.hour, cfg.minute, cfg.channel, cfg.flood_scope or 'global',
+        )
+
+    def _daily_public_notice_job_sync(self) -> None:
+        """APScheduler entrypoint (runs on the scheduler thread)."""
+        cfg = load_daily_public_notice_config(self.bot.config, logger=self.logger)
+        if cfg is None:
+            self.logger.warning(
+                'Daily_Public_Notice job fired but config is now disabled/invalid; skipping'
+            )
+            return
+        self._run_async_on_main_loop(self._send_daily_public_notice_coro(cfg), timeout=120.0)
+
+    async def _send_daily_public_notice_coro(self, cfg: DailyPublicNoticeConfig) -> None:
+        messages = render_daily_public_notice_messages(cfg, logger=self.logger)
+        if messages is None:
+            return  # render_messages already logged the specific failure
+
+        total = len(messages)
+        for i, text in enumerate(messages):
+            success = await self.bot.command_manager.send_channel_message(
+                cfg.channel, text, scope=cfg.flood_scope, skip_user_rate_limit=True,
+            )
+            if not success:
+                self.logger.warning(
+                    'Daily_Public_Notice: message %d/%d to %s failed to send',
+                    i + 1, total, cfg.channel,
+                )
+            if i < total - 1 and cfg.message_delay_seconds > 0:
+                await asyncio.sleep(cfg.message_delay_seconds)
 
     def _run_async_on_main_loop(self, coro: Any, timeout: float = 300.0) -> None:
         """Run async coroutine on bot main loop from APScheduler thread (same pattern as send_scheduled_message)."""

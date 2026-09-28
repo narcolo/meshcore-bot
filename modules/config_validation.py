@@ -50,6 +50,7 @@ CANONICAL_NON_COMMAND_SECTIONS = frozenset({
     "Keywords",
     "RandomLine",
     "Scheduled_Messages",
+    "Daily_Public_Notice",
     "Logging",
     "Custom_Syntax",
     "External_Data",
@@ -277,6 +278,21 @@ def validate_config(config_path: str) -> list[tuple[str, str]]:
                     f"  {PUBLIC_CHANNEL_OVERRIDE_KEY} = true",
                 ))
 
+    # Daily_Public_Notice guard: it deliberately works outside monitor_channels,
+    # so it needs the same Public override as monitor_channels.
+    if config.has_section("Daily_Public_Notice") and config.getboolean(
+        "Daily_Public_Notice", "enabled", fallback=False
+    ):
+        notice_channel = config.get("Daily_Public_Notice", "channel", fallback="Public").strip()
+        if _channel_name_is_public(notice_channel):
+            override = config.get("Bot", PUBLIC_CHANNEL_OVERRIDE_KEY, fallback="").strip().lower()
+            if override != "true":
+                results.append((
+                    SEVERITY_ERROR,
+                    "Daily_Public_Notice is enabled for the Public channel. Running a bot "
+                    "on Public is disruptive to other mesh users. To override, add to [Bot]:\n"
+                    f"  {PUBLIC_CHANNEL_OVERRIDE_KEY} = true",
+                ))
 
     prefix_to_section: Optional[dict[str, str]] = None
 
