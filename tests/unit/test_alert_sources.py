@@ -394,8 +394,17 @@ class TestFetchPaaRadiation:
             readings = alert_sources.fetch_paa_radiation(["Suwalki"])
         assert readings == [{
             "station": "Suwałki", "value": 0.084, "unit": "µSv/h",
-            "timestamp": "2026-08-10 20:00",
+            "timestamp": "2026-08-10 20:00", "lat": 54.130738, "lon": 22.948798,
         }]
+
+    def test_fetch_all_readings_returns_every_station_with_coordinates(self):
+        with patch(
+            "modules.clients.alert_sources.requests.get",
+            return_value=_mock_response(PAA_WFS_RESPONSE),
+        ):
+            readings = alert_sources.fetch_paa_all_readings()
+        assert len(readings) == len(PAA_WFS_RESPONSE["features"])
+        assert all(r["lat"] is not None and r["lon"] is not None for r in readings)
 
     def test_unmatched_station_is_simply_absent(self):
         with patch(
