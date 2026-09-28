@@ -98,7 +98,7 @@ class TestDigest:
         source = _source(bot)
         reading = dict(PAA_FRESH_READING, timestamp=_fresh_paa_timestamp())
         with patch(
-            "modules.service_plugins.alert_modules.paa.alert_sources.fetch_paa_all_readings",
+            "modules.service_plugins.alert_modules.paa.alert_sources.fetch_paa_radiation",
             return_value=[reading],
         ):
             await source.check()
@@ -112,7 +112,7 @@ class TestDigest:
             dict(PAA_FRESH_READING, station="Siemiatycze", value=0.068, timestamp=_fresh_paa_timestamp()),
         ]
         with patch(
-            "modules.service_plugins.alert_modules.paa.alert_sources.fetch_paa_all_readings",
+            "modules.service_plugins.alert_modules.paa.alert_sources.fetch_paa_radiation",
             return_value=readings,
         ):
             await source.check()
@@ -130,7 +130,7 @@ class TestDigest:
             dict(PAA_FRESH_READING, station="Białystok", value=0.064, timestamp=_fresh_paa_timestamp()),
         ]
         with patch(
-            "modules.service_plugins.alert_modules.paa.alert_sources.fetch_paa_all_readings",
+            "modules.service_plugins.alert_modules.paa.alert_sources.fetch_paa_radiation",
             return_value=readings,
         ):
             await source.check()
@@ -142,7 +142,7 @@ class TestDigest:
         source = _source(bot)
         reading = dict(PAA_FRESH_READING, timestamp=_fresh_paa_timestamp())  # 0.084 >= 0.01
         with patch(
-            "modules.service_plugins.alert_modules.paa.alert_sources.fetch_paa_all_readings",
+            "modules.service_plugins.alert_modules.paa.alert_sources.fetch_paa_radiation",
             return_value=[reading],
         ):
             await source.check()
@@ -154,7 +154,7 @@ class TestDigest:
         source = _source(bot)
         reading = dict(PAA_FRESH_READING, timestamp=_fresh_paa_timestamp())  # 0.084 < 0.3
         with patch(
-            "modules.service_plugins.alert_modules.paa.alert_sources.fetch_paa_all_readings",
+            "modules.service_plugins.alert_modules.paa.alert_sources.fetch_paa_radiation",
             return_value=[reading],
         ):
             await source.check()
@@ -165,7 +165,7 @@ class TestDigest:
         bot = _bot(paa_stations="Bialystok", paa_max_reading_age_hours="6")
         source = _source(bot)
         with patch(
-            "modules.service_plugins.alert_modules.paa.alert_sources.fetch_paa_all_readings",
+            "modules.service_plugins.alert_modules.paa.alert_sources.fetch_paa_radiation",
             return_value=[PAA_STALE_READING],  # 6 days old
         ):
             await source.check()
@@ -176,7 +176,7 @@ class TestDigest:
         bot = _bot(paa_stations="Nonexistent Station")
         source = _source(bot)
         with patch(
-            "modules.service_plugins.alert_modules.paa.alert_sources.fetch_paa_all_readings",
+            "modules.service_plugins.alert_modules.paa.alert_sources.fetch_paa_radiation",
             return_value=[],
         ):
             await source.check()  # must not raise
@@ -189,7 +189,7 @@ class TestDigest:
         bot = _bot(paa_stations="Suwalki")
         source = _source(bot)
         with patch(
-            "modules.service_plugins.alert_modules.paa.alert_sources.fetch_paa_all_readings",
+            "modules.service_plugins.alert_modules.paa.alert_sources.fetch_paa_radiation",
             side_effect=requests.exceptions.RequestException("boom"),
         ):
             await source.check()  # must not raise
@@ -206,127 +206,11 @@ class TestDigest:
         source = _source(bot)
         reading = dict(PAA_FRESH_READING, timestamp=_fresh_paa_timestamp())
         with patch(
-            "modules.service_plugins.alert_modules.paa.alert_sources.fetch_paa_all_readings",
+            "modules.service_plugins.alert_modules.paa.alert_sources.fetch_paa_radiation",
             return_value=[reading],
         ):
             await source.check()
         assert db_manager.get_metadata("alerts_paa_last_slot") is None
-
-
-# Approximate real coordinates: Białystok, Waliły (33 km E), Suwałki, Marynowo (27 km SW),
-# Siemiatycze, and Warszawa (far outside any sensible fallback range).
-_BIALYSTOK = (53.16813, 23.08572)
-_WALILY = (53.107872, 23.657967)
-_SUWALKI = (54.130738, 22.948798)
-_MARYNOWO = (54.091991, 23.346581)
-_WARSZAWA = (52.301689, 20.983913)
-
-
-def _reading(name, coords, value=0.07, minutes_ago=5.0, fresh=True):
-    ts = _fresh_paa_timestamp(minutes_ago) if fresh else "2026-09-17 12:00"
-    return {
-        "station": name, "value": value, "unit": "µSv/h", "timestamp": ts,
-        "lat": coords[0], "lon": coords[1],
-    }
-
-
-async def _digest(bot, readings):
-    source = _source(bot)
-    with patch(
-        "modules.service_plugins.alert_modules.paa.alert_sources.fetch_paa_all_readings",
-        return_value=readings,
-    ):
-        await source.check()
-    return "".join(_sent_chunk_lists(bot)[0]) if _sent_chunk_lists(bot) else ""
-
-
-@pytest.mark.unit
-class TestStationFallback:
-    """A stale/silent configured station is replaced by the nearest fresh one within
-    paa_fallback_max_km, labelled with the real station and distance."""
-
-    async def test_stale_station_uses_nearest_fresh_and_labels_it(self):
-        bot = _bot(paa_stations="Bialystok")
-        text = await _digest(bot, [
-            _reading("Białystok", _BIALYSTOK, fresh=False),
-            _reading("Waliły Stacja", _WALILY, value=0.070),
-            _reading("Warszawa", _WARSZAWA, value=0.098),
-        ])
-        assert "Białystok: 0.07 (Waliły Stacja, 39 km)" in text
-        assert "Warszawa" not in text
-
-    async def test_own_fresh_reading_is_preferred_over_any_backup(self):
-        bot = _bot(paa_stations="Bialystok")
-        text = await _digest(bot, [
-            _reading("Białystok", _BIALYSTOK, value=0.068),
-            _reading("Waliły Stacja", _WALILY, value=0.070),
-        ])
-        assert "Białystok: 0.068" in text
-        assert "Waliły" not in text
-
-    async def test_nearest_of_several_candidates_is_chosen(self):
-        bot = _bot(paa_stations="Suwalki")
-        text = await _digest(bot, [
-            _reading("Suwałki", _SUWALKI, fresh=False),
-            _reading("Waliły Stacja", _WALILY),
-            _reading("Marynowo", _MARYNOWO),
-        ])
-        assert "Suwałki: 0.07 (Marynowo, 26 km)" in text
-
-    async def test_nothing_within_range_shows_no_data(self):
-        bot = _bot(paa_stations="Bialystok", paa_fallback_max_km="20")
-        text = await _digest(bot, [
-            _reading("Białystok", _BIALYSTOK, fresh=False),
-            _reading("Waliły Stacja", _WALILY),  # 39 km, beyond the 20 km limit
-        ])
-        assert "Bialystok: no data" in text  # shown under the configured name
-        assert "Waliły" not in text
-
-    async def test_stale_backup_candidates_are_ignored(self):
-        bot = _bot(paa_stations="Bialystok")
-        text = await _digest(bot, [
-            _reading("Białystok", _BIALYSTOK, fresh=False),
-            _reading("Waliły Stacja", _WALILY, fresh=False),
-        ])
-        assert "Waliły" not in text
-
-    async def test_fallback_disabled_with_zero_km(self):
-        bot = _bot(paa_stations="Bialystok", paa_fallback_max_km="0")
-        text = await _digest(bot, [
-            _reading("Białystok", _BIALYSTOK, fresh=False),
-            _reading("Waliły Stacja", _WALILY),
-        ])
-        assert "Waliły" not in text
-
-    async def test_default_limit_is_50_km(self):
-        # ~55 km north of Białystok: out of the default range.
-        far = (53.66, 23.09)
-        bot = _bot(paa_stations="Bialystok")
-        text = await _digest(bot, [
-            _reading("Białystok", _BIALYSTOK, fresh=False),
-            _reading("Daleka", far),
-        ])
-        assert "Daleka" not in text
-
-    async def test_station_missing_from_response_has_no_coordinates_so_no_backup(self):
-        bot = _bot(paa_stations="Bialystok")
-        text = await _digest(bot, [_reading("Waliły Stacja", _WALILY)])
-        assert "Waliły" not in text
-
-    async def test_warning_marker_uses_the_substitute_reading(self):
-        bot = _bot(paa_stations="Bialystok", paa_alert_dose_rate_usvh="0.3")
-        text = await _digest(bot, [
-            _reading("Białystok", _BIALYSTOK, fresh=False),
-            _reading("Waliły Stacja", _WALILY, value=0.45),
-        ])
-        assert "Białystok: 0.45⚠️ (Waliły Stacja, 39 km)" in text
-
-    async def test_readings_without_coordinates_do_not_break_fallback(self):
-        bot = _bot(paa_stations="Bialystok")
-        no_coords = {"station": "Bez", "value": 0.07, "unit": "µSv/h",
-                     "timestamp": _fresh_paa_timestamp()}
-        text = await _digest(bot, [_reading("Białystok", _BIALYSTOK, fresh=False), no_coords])
-        assert "Bez" not in text
 
 
 @pytest.mark.unit
@@ -346,11 +230,11 @@ class TestRegionConfig:
         bot = _bot(paa_stations="Suwalki", paa_bbox=custom_bbox)
         source = _source(bot)
         with patch(
-            "modules.service_plugins.alert_modules.paa.alert_sources.fetch_paa_all_readings",
+            "modules.service_plugins.alert_modules.paa.alert_sources.fetch_paa_radiation",
             return_value=[],
         ) as mock_fetch:
             await source.check()
-        mock_fetch.assert_called_once_with(custom_bbox)
+        mock_fetch.assert_called_once_with(["Suwalki"], custom_bbox)
 
     async def test_default_bbox_is_the_podlaskie_box(self):
         from modules.clients import alert_sources
@@ -358,8 +242,8 @@ class TestRegionConfig:
         bot = _bot(paa_stations="Suwalki")
         source = _source(bot)
         with patch(
-            "modules.service_plugins.alert_modules.paa.alert_sources.fetch_paa_all_readings",
+            "modules.service_plugins.alert_modules.paa.alert_sources.fetch_paa_radiation",
             return_value=[],
         ) as mock_fetch:
             await source.check()
-        mock_fetch.assert_called_once_with(alert_sources.PAA_PODLASKIE_BBOX)
+        mock_fetch.assert_called_once_with(["Suwalki"], alert_sources.PAA_PODLASKIE_BBOX)
