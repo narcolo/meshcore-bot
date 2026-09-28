@@ -185,10 +185,7 @@ from modules.feed_manager import (
 from modules.repeater_manager import RepeaterManager, validate_repeater_tables
 from modules.utils import resolve_path
 from modules.web_viewer.config_panels import CONFIG_PANELS, PANEL_CATEGORIES
-from modules.web_viewer.integration import (
-    normalized_web_viewer_password,
-    normalized_web_viewer_readonly_password,
-)
+from modules.web_viewer.integration import normalized_web_viewer_password
 
 
 def _read_limited_requests_response(
@@ -370,26 +367,22 @@ class BotDataViewer:
 
         # Optional password authentication for web viewer (BUG-001)
         self.web_viewer_password = normalized_web_viewer_password(self.config)
-        # Optional second login that can see everything but change nothing.
-        self.web_viewer_readonly_password = normalized_web_viewer_readonly_password(self.config)
-        if self.web_viewer_readonly_password and not self.web_viewer_password:
+        # Optional: let anyone view without logging in; only the admin password
+        # (login link in the nav bar) unlocks changes. Off by default so an
+        # existing password-protected install does not become publicly viewable.
+        self.web_viewer_public_readonly = self.config.getboolean(
+            'Web_Viewer', 'web_viewer_public_readonly', fallback=False
+        )
+        if self.web_viewer_public_readonly and not self.web_viewer_password:
             self.logger.warning(
-                "web_viewer_readonly_password is set but web_viewer_password is not: "
-                "authentication is disabled, so the read-only login is ignored."
+                "web_viewer_public_readonly is set but web_viewer_password is not: "
+                "authentication is disabled, so everyone is already an admin."
             )
-            self.web_viewer_readonly_password = ""
-        elif self.web_viewer_readonly_password and hmac.compare_digest(
-            self.web_viewer_readonly_password.encode(), self.web_viewer_password.encode()
-        ):
-            self.logger.warning(
-                "web_viewer_readonly_password equals web_viewer_password: "
-                "that password logs in as admin. Use a different read-only password."
-            )
-            self.web_viewer_readonly_password = ""
+            self.web_viewer_public_readonly = False
         if self.web_viewer_password:
             self.logger.info(
-                "Web viewer authentication enabled (read-only login: %s)",
-                "yes" if self.web_viewer_readonly_password else "no",
+                "Web viewer authentication enabled (public read-only view: %s)",
+                "yes" if self.web_viewer_public_readonly else "no",
             )
         else:
             self.logger.warning(
@@ -625,7 +618,7 @@ class BotDataViewer:
                     'radio_offline': radio_offline,
                     'radio_offline_since': radio_offline_since,
                     'bot_initializing': bot_initializing,
-                    'web_role': session.get('role', 'admin') if session.get('authenticated') else None,
+                    'web_role': self._web_role(),
                 }
             except Exception as e:
                 self.logger.exception("Template context processor failed: %s", e)
@@ -641,6 +634,14 @@ class BotDataViewer:
                     'radio_offline': False,
                     'radio_offline_since': None,
                 }
+
+    def _web_role(self) -> str | None:
+        """'admin' when logged in, 'viewer' for anonymous read-only access, else None."""
+        if not self.web_viewer_password:
+            return None  # auth disabled: no roles in play
+        if session.get('authenticated'):
+            return 'admin'
+        return 'viewer' if self.web_viewer_public_readonly else None
 
     def _init_databases(self):
         """Initialize database connections"""
@@ -1254,17 +1255,19 @@ class BotDataViewer:
             if request.path in _EXEMPT_PATHS or request.path.startswith('/static/'):
                 return
             if session.get('authenticated'):
-                # A viewer can read everything but change nothing: every method
-                # other than GET/HEAD/OPTIONS is refused. Sessions created before
-                # roles existed carry no role and stay admin.
-                if session.get('role') == 'viewer' and request.method not in ('GET', 'HEAD', 'OPTIONS'):
-                    self.logger.info(
-                        "Read-only web viewer session blocked: %s %s", request.method, request.path
-                    )
-                    return make_response(
-                        jsonify({'error': 'Read-only access: this login cannot make changes'}), 403
-                    )
                 return
+            if self.web_viewer_public_readonly:
+                # Anonymous visitors get a read-only view; anything that could
+                # change state (every method except GET/HEAD/OPTIONS) needs the
+                # admin login. Method-based so routes added later are covered.
+                if request.method in ('GET', 'HEAD', 'OPTIONS'):
+                    return
+                self.logger.info(
+                    "Anonymous web viewer request blocked: %s %s", request.method, request.path
+                )
+                return make_response(
+                    jsonify({'error': 'Admin login required to make changes'}), 401
+                )
             if request.path.startswith('/api/'):
                 return make_response(jsonify({'error': 'Authentication required'}), 401)
             next_url = request.path
@@ -1371,13 +1374,9 @@ class BotDataViewer:
                 return redirect(url_for('index'))
             if request.method == 'POST':
                 password = request.form.get('password', '')
-                role = None
-                if hmac.compare_digest(password.encode(), self.web_viewer_password.encode()):
-                    role = 'admin'
-                elif self.web_viewer_readonly_password and hmac.compare_digest(
-                    password.encode(), self.web_viewer_readonly_password.encode()
-                ):
-                    role = 'viewer'
+                role = 'admin' if hmac.compare_digest(
+                    password.encode(), self.web_viewer_password.encode()
+                ) else None
                 if role:
                     session['authenticated'] = True
                     session['role'] = role
@@ -1387,8 +1386,11 @@ class BotDataViewer:
                     if parsed.scheme or parsed.netloc or not next_url.startswith('/'):
                         next_url = '/'
                     return redirect(next_url)
-                return render_template('login.html', error='Invalid password')
-            return render_template('login.html')
+                return render_template(
+                    'login.html', error='Invalid password',
+                    admin_login=self.web_viewer_public_readonly,
+                )
+            return render_template('login.html', admin_login=self.web_viewer_public_readonly)
 
         @self.app.route('/logout')
         def logout():
@@ -5314,7 +5316,11 @@ class BotDataViewer:
                     return False
 
                 # Reject unauthenticated SocketIO connections when auth is enabled (BUG-001)
-                if self.web_viewer_password and not session.get('authenticated'):
+                if (
+                    self.web_viewer_password
+                    and not session.get('authenticated')
+                    and not self.web_viewer_public_readonly
+                ):
                     self.logger.warning(f"Rejected unauthenticated SocketIO connection from {client_id}")
                     with suppress(Exception):
                         disconnect()

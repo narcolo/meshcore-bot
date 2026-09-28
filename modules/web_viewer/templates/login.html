@@ -189,7 +189,11 @@
                     </div>
                     <h1 class="login-title">MeshCore Bot</h1>
                     <p class="login-subtitle">Data Viewer</p>
+                    {% if admin_login %}
+                    <p class="login-hint mb-0">Admin login &mdash; needed only to make changes.</p>
+                    {% else %}
                     <p class="login-hint mb-0">Enter your password to continue.</p>
+                    {% endif %}
                 </div>
                 {% if error %}
                 <div class="alert alert-danger py-2 mt-3 mb-3">{{ error }}</div>
@@ -201,6 +205,9 @@
                                autofocus autocomplete="current-password" required>
                     </div>
                     <button type="submit" class="btn btn-primary w-100 login-submit">Sign in</button>
+                    {% if admin_login %}
+                    <a href="/" class="btn btn-link w-100 mt-2">Continue read-only</a>
+                    {% endif %}
                 </form>
             </div>
         </div>
