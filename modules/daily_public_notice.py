@@ -14,6 +14,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Optional
 
+from .flood_scope import normalize_scope_name
+
 SECTION = "Daily_Public_Notice"
 MESSAGE_KEY_PREFIX = "message."
 SCOPES_PLACEHOLDER = "{scopes}"
@@ -92,7 +94,9 @@ def load_config(bot_config: Any, logger: Any = None) -> Optional[DailyPublicNoti
             logger.error("Daily_Public_Notice: channel is empty; disabling")
         return None
 
-    flood_scope = (bot_config.get(SECTION, "flood_scope", fallback="pl-podlasie") or "").strip()
+    # Canonical '#'-prefixed form (a global marker stays as-is); "west" and
+    # "#west" in config are the same region.
+    flood_scope = normalize_scope_name(bot_config.get(SECTION, "flood_scope", fallback="pl-podlasie"))
 
     recommended_raw = bot_config.get(SECTION, "recommended_scopes", fallback="")
     recommended_scopes = tuple(s.strip() for s in recommended_raw.split(",") if s.strip())

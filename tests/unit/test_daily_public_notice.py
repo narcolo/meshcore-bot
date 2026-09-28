@@ -50,7 +50,7 @@ class TestLoadConfig:
         assert result.hour == 19
         assert result.minute == 0
         assert result.channel == "Public"
-        assert result.flood_scope == "pl-podlasie"
+        assert result.flood_scope == "#pl-podlasie"
         assert result.recommended_scopes == ("pl", "pl-podlasie", "pl-bia")
         assert result.max_message_bytes == 120
         assert result.message_delay_seconds == 5.0
@@ -69,7 +69,14 @@ class TestLoadConfig:
 
     def test_custom_flood_scope(self):
         result = load_config(_config(**{"flood_scope": "sea"}))
-        assert result.flood_scope == "sea"
+        assert result.flood_scope == "#sea"
+
+    def test_flood_scope_accepts_hash_form_without_double_hash(self):
+        result = load_config(_config(**{"flood_scope": " #sea "}))
+        assert result.flood_scope == "#sea"
+
+    def test_global_flood_scope_marker_kept(self):
+        assert load_config(_config(**{"flood_scope": "*"})).flood_scope == "*"
 
     def test_custom_recommended_scopes(self):
         result = load_config(_config(**{"recommended_scopes": "a,b"}))
@@ -193,7 +200,7 @@ class TestRenderMessages:
         template = "S: {scopes}."
         cfg = self._cfg(
             recommended_scopes=("pl", "pl-podlasie", "pl-bia"),
-            max_message_bytes=len("S: pl.".encode("utf-8")),
+            max_message_bytes=len(b"S: pl."),
             message_templates=(template,),
         )
         rendered = render_messages(cfg)
@@ -214,7 +221,7 @@ class TestRenderMessages:
     def test_url_never_shortened_or_truncated(self):
         url = "https://meshcore.podlasie.pl"
         cfg = self._cfg(
-            max_message_bytes=len(f"Info: {url}".encode("utf-8")),
+            max_message_bytes=len(f"Info: {url}".encode()),
             message_templates=(f"Info: {url}",),
         )
         rendered = render_messages(cfg)
