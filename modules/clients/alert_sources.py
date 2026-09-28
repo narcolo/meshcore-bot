@@ -128,6 +128,13 @@ def fetch_imgw_meteo_warnings(
             return []
     resp.raise_for_status()
     warnings = resp.json()
+    if isinstance(warnings, dict):
+        # IMGW now answers 200 with {"message": "Brak ostrzezen meteorologicznych"}
+        # (confirmed live 2026-09-28) instead of [] when nothing is active.
+        # Iterating the dict yields its str keys, which used to blow up below.
+        if "message" in warnings:
+            return []
+        raise ValueError(f"unexpected IMGW warnings payload: {str(warnings)[:200]}")
 
     records = []
     for w in warnings:

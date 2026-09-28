@@ -142,6 +142,22 @@ class TestFetchImgwMeteoWarnings:
             records = alert_sources.fetch_imgw_meteo_warnings()
         assert records == []
 
+    def test_200_with_message_dict_means_zero_warnings(self):
+        with patch(
+            "modules.clients.alert_sources.requests.get",
+            return_value=_mock_response({"message": "Brak ostrze\u017ce\u0144 meteorologicznych"}),
+        ):
+            records = alert_sources.fetch_imgw_meteo_warnings()
+        assert records == []
+
+    def test_unexpected_dict_payload_raises_value_error(self):
+        with patch(
+            "modules.clients.alert_sources.requests.get",
+            return_value=_mock_response({"status": "weird"}),
+        ):
+            with pytest.raises(ValueError):
+                alert_sources.fetch_imgw_meteo_warnings()
+
     def test_404_with_no_products_found_means_zero_warnings_not_a_failure(self):
         """IMGW returns HTTP 404 (not 200 + []) with {"status": false, "message":
         "No products were found"} when there are currently zero active warnings
