@@ -194,6 +194,7 @@ SECTIONS: dict[str, SectionMeta] = {
         "port": KeyMeta(type="int"),
         "web_viewer_password": KeyMeta(),
         "web_viewer_public_readonly": KeyMeta(type="bool", default="false"),
+        "web_viewer_read_only": KeyMeta(type="bool", default="false"),
         "auto_start": KeyMeta(type="bool"),
         "debug": KeyMeta(type="bool"),
         # Advanced; read by the viewer but not shown in config.ini.example.

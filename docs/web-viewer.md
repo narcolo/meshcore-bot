@@ -513,6 +513,26 @@ chmod +x restart_viewer.sh
 - Set `host = 0.0.0.0` for network access (use with caution)
 - For network access, set `web_viewer_password` or use a reverse proxy with authentication and firewall rules
 
+### Read-only mode
+
+Set `web_viewer_read_only = true` to disable every change made through the web interface,
+for everyone including admins:
+
+```ini
+[Web_Viewer]
+web_viewer_read_only = true
+```
+
+- Every request that is not GET/HEAD/OPTIONS is refused with HTTP 403, on the server, for
+  every route (including ones added later). A banner shows that the viewer is read-only.
+- Read-only helpers keep working: the path decoder, mesh path resolver, feed and scheduled
+  message previews, channel validation, the radio config read, and the dashboard refresh.
+  The bot's own live-data feed to the viewer is not affected.
+- Combines with the password settings below: with a password set, login is still required
+  to view (unless `web_viewer_public_readonly` is on). With no password the viewer is open
+  and read-only.
+- To change settings while it is on, edit `config.ini` and restart or reload the bot.
+
 ### Public read-only view with an admin login
 
 By default a configured `web_viewer_password` is required for everything. Set
