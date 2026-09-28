@@ -227,21 +227,16 @@ def fetch_gios_aqindex(station_id: int) -> Optional[dict[str, Any]]:
     }
 
 
-def fetch_paa_radiation(station_names: list[str], bbox: str = PAA_PODLASKIE_BBOX) -> list[dict[str, Any]]:
-    """Live PAA radiation dose-rate readings for the given station names.
+def fetch_paa_all_readings(bbox: str = PAA_PODLASKIE_BBOX) -> list[dict[str, Any]]:
+    """Live PAA radiation dose-rate readings for every station inside `bbox`.
 
-    Only stations whose "stacja" name case-insensitively matches one of
-    station_names are returned; a configured name absent from the response is
-    simply missing from the result (callers should log if that's unexpected).
-    `bbox` limits which stations the WFS query even considers -- a station
-    outside it is never returned regardless of station_names, so a deployment
-    monitoring stations outside Podlaskie must widen this too (default
-    preserves current behavior) -- see [Alerts_Service] paa_bbox in
-    config.ini.example for how to compute one for another region.
+    Each reading carries the station's coordinates (`lat`, `lon`, None when PAA
+    omits the geometry) so callers can pick the nearest working station when a
+    configured one has stopped reporting. `bbox` limits which stations the WFS
+    query even considers -- see [Alerts_Service] paa_bbox in config.ini.example.
 
     Raises requests.RequestException / ValueError on network/parse failure.
     """
-    wanted = {normalize_station_name(name) for name in station_names if name.strip()}
     resp = requests.get(
         PAA_WFS_URL,
         params={
@@ -262,15 +257,34 @@ def fetch_paa_radiation(station_names: list[str], bbox: str = PAA_PODLASKIE_BBOX
     for feature in data.get("features", []):
         props = feature.get("properties") or {}
         name = (props.get("stacja") or "").strip()
-        if normalize_station_name(name) not in wanted:
+        if not name:
             continue
         match = _PAA_VALUE_RE.match((props.get("tip_value") or "").strip())
         if not match:
             continue
+        coords = (feature.get("geometry") or {}).get("coordinates") or []
+        lon, lat = (coords[0], coords[1]) if len(coords) >= 2 else (None, None)
         readings.append({
             "station": name,
             "value": float(match.group(1)),
             "unit": match.group(2),
             "timestamp": props.get("tip_date"),
+            "lat": lat,
+            "lon": lon,
         })
     return readings
+
+
+def fetch_paa_radiation(station_names: list[str], bbox: str = PAA_PODLASKIE_BBOX) -> list[dict[str, Any]]:
+    """Live PAA readings for just the given station names (case/diacritic-insensitive).
+
+    A configured name absent from the response is simply missing from the
+    result (callers should log if that's unexpected).
+
+    Raises requests.RequestException / ValueError on network/parse failure.
+    """
+    wanted = {normalize_station_name(name) for name in station_names if name.strip()}
+    return [
+        r for r in fetch_paa_all_readings(bbox)
+        if normalize_station_name(r["station"]) in wanted
+    ]

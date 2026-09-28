@@ -2393,6 +2393,14 @@ paa_alert_dose_rate_usvh = 0.3
 # days stale during research -- some PAA stations lag badly)
 paa_max_reading_age_hours = 6
 
+# When a configured station has no fresh reading (stale, or silent for days -- Bialystok
+# and Suwalki both went dark in Sept 2026), the digest uses the nearest station that
+# does have a fresh reading, if it is within this many km, and labels it with the real
+# station and distance, e.g. "Bialystok: 0.07 (Walily Stacja, 39 km)". Nothing in range
+# shows the station as "no data". 0 disables the fallback. Candidates must lie inside
+# paa_bbox, and distance is straight-line between the two stations' coordinates.
+paa_fallback_max_km = 50
+
 # Message template: either a preset name or a custom format string. Empty = compact.
 # Preset: compact (default -- "☢️ {prefix} [{when}]: {stations} {unit}"). `stations` is
 # a single pre-joined "Name: value(marker), Name2: value2" list -- not independently
