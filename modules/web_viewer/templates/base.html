@@ -518,7 +518,7 @@
 
                 <!-- Dark Mode Toggle and Connection Status -->
                 <div class="navbar-nav d-flex align-items-center">
-                    {% if web_role == 'viewer' %}
+                    {% if web_role == 'viewer' and not web_read_only %}
                     <div class="nav-item me-3">
                         <a class="btn btn-sm btn-outline-primary" href="/login?next={{ request.path | urlencode }}"
                            title="Log in as admin to make changes">
@@ -548,7 +548,13 @@
         </div>
     </nav>
 
-    {% if web_role == 'viewer' %}
+    {% if web_read_only %}
+    <div class="alert alert-secondary mb-0 rounded-0 border-0 border-bottom py-1 small" role="status">
+        <div class="container-fluid">
+            <i class="fas fa-eye me-1"></i> Read-only mode: changes through the web interface are disabled.
+        </div>
+    </div>
+    {% elif web_role == 'viewer' %}
     <div class="alert alert-secondary mb-0 rounded-0 border-0 border-bottom py-1 small" role="status">
         <div class="container-fluid">
             <i class="fas fa-eye me-1"></i> Read-only view. Changes need an

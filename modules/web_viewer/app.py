@@ -367,6 +367,13 @@ class BotDataViewer:
 
         # Optional password authentication for web viewer (BUG-001)
         self.web_viewer_password = normalized_web_viewer_password(self.config)
+        # Master switch: refuse every change made through the web interface, for
+        # everyone including admins. Editing for admins will be built on top later.
+        self.web_viewer_read_only = self.config.getboolean(
+            'Web_Viewer', 'web_viewer_read_only', fallback=False
+        )
+        if self.web_viewer_read_only:
+            self.logger.info("Web viewer is READ-ONLY: changes through the web interface are disabled")
         # Optional: let anyone view without logging in; only the admin password
         # (login link in the nav bar) unlocks changes. Off by default so an
         # existing password-protected install does not become publicly viewable.
@@ -619,6 +626,7 @@ class BotDataViewer:
                     'radio_offline_since': radio_offline_since,
                     'bot_initializing': bot_initializing,
                     'web_role': self._web_role(),
+                    'web_read_only': self.web_viewer_read_only,
                 }
             except Exception as e:
                 self.logger.exception("Template context processor failed: %s", e)
@@ -1248,6 +1256,36 @@ class BotDataViewer:
             """Create a per-response nonce for templates migrated off inline-script CSP."""
             g.csp_nonce = secrets.token_urlsafe(24)
 
+        # POST endpoints that only read or compute (no state change) and must keep
+        # working in read-only mode; /api/stream_data is the bot's own ingest and
+        # authenticates itself with X-Stream-Token; /login only creates a session.
+        _READ_ONLY_SAFE_POSTS = frozenset([
+            '/login',
+            '/api/stream_data',
+            '/api/decode-path',
+            '/api/mesh/resolve-path',
+            '/api/channels/validate',
+            '/api/feeds/preview',
+            '/api/feeds/test',
+            '/api/scheduled-messages/preview',
+            '/api/radio/firmware/config/read',
+            '/api/dashboard/refresh',
+        ])
+
+        def _is_change_request() -> bool:
+            """True for any request that could change state (not GET/HEAD/OPTIONS, not a known read-only POST)."""
+            if request.method in ('GET', 'HEAD', 'OPTIONS'):
+                return False
+            return request.path not in _READ_ONLY_SAFE_POSTS
+
+        @self.app.before_request
+        def enforce_read_only():
+            if self.web_viewer_read_only and _is_change_request():
+                self.logger.info("Read-only mode blocked: %s %s", request.method, request.path)
+                return make_response(
+                    jsonify({'error': 'Web viewer is read-only: changes are disabled'}), 403
+                )
+
         @self.app.before_request
         def require_auth():
             if not self.web_viewer_password:
@@ -1260,7 +1298,7 @@ class BotDataViewer:
                 # Anonymous visitors get a read-only view; anything that could
                 # change state (every method except GET/HEAD/OPTIONS) needs the
                 # admin login. Method-based so routes added later are covered.
-                if request.method in ('GET', 'HEAD', 'OPTIONS'):
+                if not _is_change_request():
                     return
                 self.logger.info(
                     "Anonymous web viewer request blocked: %s %s", request.method, request.path

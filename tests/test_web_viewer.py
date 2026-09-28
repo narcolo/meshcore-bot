@@ -1365,6 +1365,106 @@ class TestWebViewerRoles:
 
 
 # ===========================================================================
+# Read-only mode (web_viewer_read_only)
+# ===========================================================================
+
+def _make_viewer(tmp_path, web_cfg):
+    db_path = str(tmp_path / "test.db")
+    config_path = str(tmp_path / "config.ini")
+    cfg = configparser.ConfigParser()
+    cfg["Connection"] = {"connection_type": "serial", "serial_port": "/dev/ttyUSB0"}
+    cfg["Bot"] = {"bot_name": "TestBot", "db_path": db_path, "prefix_bytes": "1"}
+    cfg["Web_Viewer"] = web_cfg
+    cfg["Path_Command"] = {
+        "graph_capture_enabled": "false",
+        "graph_write_strategy": "immediate",
+    }
+    with open(config_path, "w") as f:
+        cfg.write(f)
+    with (
+        patch.object(BotDataViewer, "_setup_logging", _fake_setup_logging),
+        patch.object(BotDataViewer, "_start_database_polling", lambda self: None),
+        patch.object(BotDataViewer, "_start_log_tailing", lambda self: None),
+        patch.object(BotDataViewer, "_start_cleanup_scheduler", lambda self: None),
+        patch.object(BotDataViewer, "_start_dashboard_refresher", lambda self: None),
+    ):
+        v = BotDataViewer(db_path=db_path, config_path=config_path)
+    v.app.config["TESTING"] = True
+    return v
+
+
+READ_ONLY_MSG = "Web viewer is read-only"
+
+
+class TestReadOnlyMode:
+    """web_viewer_read_only: every change is refused, for everyone."""
+
+    @pytest.fixture
+    def ro_client(self, tmp_path):
+        v = _make_viewer(tmp_path, {"web_viewer_read_only": "true"})
+        with v.app.test_client() as c:
+            yield c
+
+    def test_pages_and_api_reads_work(self, ro_client):
+        assert ro_client.get("/").status_code == 200
+        assert ro_client.get("/api/health").status_code == 200
+
+    def test_banner_is_shown(self, ro_client):
+        assert b"Read-only mode" in ro_client.get("/").data
+
+    @pytest.mark.parametrize("method", ["post", "put", "delete", "patch"])
+    def test_change_requests_are_refused(self, ro_client, method):
+        resp = getattr(ro_client, method)("/api/config/logging", json={})
+        assert resp.status_code == 403
+        assert READ_ONLY_MSG in resp.get_json()["error"]
+
+    def test_routes_added_later_are_covered(self, ro_client):
+        resp = ro_client.post("/api/some/future/write", json={})
+        assert resp.status_code == 403
+        assert READ_ONLY_MSG in resp.get_json()["error"]
+
+    @pytest.mark.parametrize("path", [
+        "/api/decode-path", "/api/mesh/resolve-path", "/api/channels/validate",
+        "/api/feeds/preview", "/api/feeds/test", "/api/scheduled-messages/preview",
+        "/api/dashboard/refresh", "/api/stream_data",
+    ])
+    def test_read_only_helpers_and_bot_ingest_are_not_blocked(self, ro_client, path):
+        resp = ro_client.post(path, json={})
+        body = resp.get_json(silent=True) or {}
+        assert READ_ONLY_MSG not in str(body.get("error", ""))
+
+    def test_admin_login_does_not_unlock_changes(self, tmp_path):
+        v = _make_viewer(tmp_path, {"web_viewer_password": "adminpw", "web_viewer_read_only": "true"})
+        with v.app.test_client() as c:
+            assert c.post("/login", data={"password": "adminpw"}).status_code == 302
+            resp = c.post("/api/config/logging", json={})
+            assert resp.status_code == 403
+            assert READ_ONLY_MSG in resp.get_json()["error"]
+
+    def test_no_admin_login_link_when_read_only(self, tmp_path):
+        v = _make_viewer(tmp_path, {
+            "web_viewer_password": "adminpw",
+            "web_viewer_public_readonly": "true",
+            "web_viewer_read_only": "true",
+        })
+        with v.app.test_client() as c:
+            body = c.get("/").data
+            assert b"Read-only mode" in body
+            assert b"Admin login" not in body
+
+    def test_public_view_allows_read_only_helpers_for_anonymous(self, roles_client):
+        resp = roles_client.post("/api/decode-path", json={})
+        assert "Admin login required" not in str((resp.get_json(silent=True) or {}).get("error", ""))
+
+    def test_default_is_not_read_only(self, tmp_path):
+        v = _make_viewer(tmp_path, {})
+        with v.app.test_client() as c:
+            resp = c.post("/api/some/future/write", json={})
+            assert READ_ONLY_MSG not in str((resp.get_json(silent=True) or {}).get("error", ""))
+            assert b"Read-only mode" not in c.get("/").data
+
+
+# ===========================================================================
 # Open-access routes (no auth required even with password enabled)
 # ===========================================================================
 

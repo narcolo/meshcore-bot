@@ -1873,6 +1873,12 @@ enabled = false
 # reach the port can read logs, contacts, and mesh data.
 # web_viewer_public_readonly = false
 
+# Master read-only switch: refuse every change made through the web interface (saving
+# settings, deleting contacts, radio operations, backups, ...), for everyone including
+# admins. Pages, live feeds and read-only helpers (path decoder, previews) keep working.
+# Edit config.ini directly to change settings while this is on. Default false.
+# web_viewer_read_only = false
+
 # Web viewer host address
 # SECURITY WARNING:
 # - 127.0.0.1: Only accessible from localhost (SECURE - recommended)
