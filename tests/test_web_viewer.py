@@ -142,6 +142,47 @@ def auth_client(auth_viewer):
         yield c
 
 
+@pytest.fixture
+def roles_viewer(tmp_path_factory):
+    """BotDataViewer with an admin password and a separate read-only password."""
+    tmp = tmp_path_factory.mktemp("web_viewer_roles")
+    db_path = str(tmp / "test.db")
+    config_path = str(tmp / "config.ini")
+
+    cfg = configparser.ConfigParser()
+    cfg["Connection"] = {"connection_type": "serial", "serial_port": "/dev/ttyUSB0"}
+    cfg["Bot"] = {"bot_name": "TestBot", "db_path": db_path, "prefix_bytes": "1"}
+    cfg["Web_Viewer"] = {
+        "web_viewer_password": "adminpw",
+        "web_viewer_readonly_password": "viewerpw",
+    }
+    cfg["Path_Command"] = {
+        "graph_capture_enabled": "false",
+        "graph_write_strategy": "immediate",
+    }
+    with open(config_path, "w") as f:
+        cfg.write(f)
+
+    with (
+        patch.object(BotDataViewer, "_setup_logging", _fake_setup_logging),
+        patch.object(BotDataViewer, "_start_database_polling", lambda self: None),
+        patch.object(BotDataViewer, "_start_log_tailing", lambda self: None),
+        patch.object(BotDataViewer, "_start_cleanup_scheduler", lambda self: None),
+        patch.object(BotDataViewer, "_start_dashboard_refresher", lambda self: None),
+    ):
+        v = BotDataViewer(db_path=db_path, config_path=config_path)
+
+    v.app.config["TESTING"] = True
+    yield v
+
+
+@pytest.fixture
+def roles_client(roles_viewer):
+    with roles_viewer.app.test_client() as c:
+        yield c
+
+
+
 @pytest.fixture(autouse=True)
 def cleanup_sqlite_connections(monkeypatch):
     """Track and close SQLite connections opened during each test."""
@@ -1222,6 +1263,97 @@ class TestAuthRoutes:
         resp = client.get("/login", follow_redirects=False)
         assert resp.status_code == 302
         assert resp.headers["Location"].endswith("/")
+
+
+# ===========================================================================
+# Admin / read-only roles
+# ===========================================================================
+
+class TestWebViewerRoles:
+    """web_viewer_readonly_password: see everything, change nothing."""
+
+    def _login(self, client, password):
+        return client.post("/login", data={"password": password}, follow_redirects=False)
+
+    def test_both_passwords_log_in(self, roles_client):
+        assert self._login(roles_client, "adminpw").status_code == 302
+        with roles_client.session_transaction() as sess:
+            assert sess["role"] == "admin"
+        roles_client.get("/logout")
+        assert self._login(roles_client, "viewerpw").status_code == 302
+        with roles_client.session_transaction() as sess:
+            assert sess["role"] == "viewer"
+
+    def test_wrong_password_still_rejected(self, roles_client):
+        resp = self._login(roles_client, "nope")
+        assert resp.status_code == 200
+        assert b"Invalid" in resp.data
+
+    def test_viewer_can_read_pages_and_api(self, roles_client):
+        self._login(roles_client, "viewerpw")
+        assert roles_client.get("/").status_code == 200
+        assert roles_client.get("/api/health").status_code == 200
+
+    def test_viewer_sees_readonly_badge(self, roles_client):
+        self._login(roles_client, "viewerpw")
+        assert b"Read-only" in roles_client.get("/").data
+
+    def test_admin_has_no_readonly_badge(self, roles_client):
+        self._login(roles_client, "adminpw")
+        assert b"Read-only" not in roles_client.get("/").data
+
+    @pytest.mark.parametrize("method", ["post", "put", "delete", "patch"])
+    def test_viewer_write_methods_are_refused(self, roles_client, method):
+        self._login(roles_client, "viewerpw")
+        resp = getattr(roles_client, method)("/api/config/logging", json={})
+        assert resp.status_code == 403
+        assert "Read-only" in resp.get_json()["error"]
+
+    def test_viewer_write_refused_on_route_that_does_not_exist_yet(self, roles_client):
+        """The block is method-based, so future routes are covered without listing them."""
+        self._login(roles_client, "viewerpw")
+        assert roles_client.post("/api/some/future/write", json={}).status_code == 403
+
+    def test_admin_write_is_not_blocked_by_role(self, roles_client):
+        self._login(roles_client, "adminpw")
+        resp = roles_client.post("/api/some/future/write", json={})
+        assert resp.status_code != 403
+
+    def test_viewer_cannot_read_redacted_secrets(self, roles_client):
+        self._login(roles_client, "viewerpw")
+        body = roles_client.get("/admin/config").data
+        assert b"adminpw" not in body
+        assert b"viewerpw" not in body
+
+    def test_logout_clears_role(self, roles_client):
+        self._login(roles_client, "viewerpw")
+        roles_client.get("/logout")
+        with roles_client.session_transaction() as sess:
+            assert "role" not in sess
+        assert roles_client.get("/api/health").status_code == 401
+
+    def test_session_without_role_is_admin(self, roles_client):
+        """Sessions created before roles existed keep working as admin."""
+        with roles_client.session_transaction() as sess:
+            sess["authenticated"] = True
+        assert roles_client.post("/api/some/future/write", json={}).status_code != 403
+
+    def test_readonly_password_without_admin_password_is_ignored(self, tmp_path):
+        from modules.web_viewer.integration import (
+            normalized_web_viewer_password,
+            normalized_web_viewer_readonly_password,
+        )
+        cfg = configparser.ConfigParser()
+        cfg["Web_Viewer"] = {"web_viewer_readonly_password": "viewerpw"}
+        assert normalized_web_viewer_password(cfg) == ""
+        assert normalized_web_viewer_readonly_password(cfg) == "viewerpw"
+
+    @pytest.mark.parametrize("raw", ["", "none", "NULL", '""'])
+    def test_readonly_placeholder_values_mean_no_viewer_login(self, raw):
+        from modules.web_viewer.integration import normalized_web_viewer_readonly_password
+        cfg = configparser.ConfigParser()
+        cfg["Web_Viewer"] = {"web_viewer_readonly_password": raw}
+        assert normalized_web_viewer_readonly_password(cfg) == ""
 
 
 # ===========================================================================
