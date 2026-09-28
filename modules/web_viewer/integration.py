@@ -23,15 +23,15 @@ from ..db_retention import (
 from ..utils import resolve_path
 
 
-def normalized_web_viewer_password(config) -> str:
-    """Return the effective web viewer password, or '' to disable the login screen.
+def _normalized_password(config, key: str) -> str:
+    """Return a cleaned [Web_Viewer] password value, or '' when unset/placeholder.
 
     Blank values, quoted empties (e.g. INI ``""``), and placeholders ``none`` / ``null`` /
     ``nil`` (case-insensitive) are treated as no password.
     """
     if not config.has_section("Web_Viewer"):
         return ""
-    raw = config.get("Web_Viewer", "web_viewer_password", fallback="")
+    raw = config.get("Web_Viewer", key, fallback="")
     if raw is None:
         return ""
     s = str(raw).strip()
@@ -44,6 +44,16 @@ def normalized_web_viewer_password(config) -> str:
     if s.lower() in ("none", "null", "nil"):
         return ""
     return s
+
+
+def normalized_web_viewer_password(config) -> str:
+    """Return the admin web viewer password, or '' to disable the login screen."""
+    return _normalized_password(config, "web_viewer_password")
+
+
+def normalized_web_viewer_readonly_password(config) -> str:
+    """Return the read-only (viewer) password, or '' when no viewer login is configured."""
+    return _normalized_password(config, "web_viewer_readonly_password")
 
 
 class BotIntegration:

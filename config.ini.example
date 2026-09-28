@@ -1865,6 +1865,14 @@ enabled = false
 # Recommendation: always set a password when host != 127.0.0.1
 # web_viewer_password = changeme
 
+# Optional second login for people who should see everything but change nothing.
+# Logging in with this password gives a read-only session: every page and live feed
+# is visible (secrets such as passwords and webhook URLs stay redacted), but any
+# request that would change something (POST/PUT/DELETE) is refused with HTTP 403.
+# The admin web_viewer_password keeps full access. Must differ from web_viewer_password
+# and needs web_viewer_password to be set (otherwise there is no login at all).
+# web_viewer_readonly_password = viewonly
+
 # Web viewer host address
 # SECURITY WARNING:
 # - 127.0.0.1: Only accessible from localhost (SECURE - recommended)

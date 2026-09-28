@@ -518,6 +518,13 @@
 
                 <!-- Dark Mode Toggle and Connection Status -->
                 <div class="navbar-nav d-flex align-items-center">
+                    {% if web_role == 'viewer' %}
+                    <div class="nav-item me-3">
+                        <span class="badge bg-secondary" title="This login can view everything but cannot make changes">
+                            <i class="fas fa-eye"></i> Read-only
+                        </span>
+                    </div>
+                    {% endif %}
                     <div class="nav-item me-3">
                         <button class="dark-mode-toggle" id="dark-mode-toggle" aria-label="Toggle dark mode"
                             title="Toggle dark mode">
