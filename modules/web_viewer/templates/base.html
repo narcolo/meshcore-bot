@@ -520,9 +520,15 @@
                 <div class="navbar-nav d-flex align-items-center">
                     {% if web_role == 'viewer' %}
                     <div class="nav-item me-3">
-                        <span class="badge bg-secondary" title="This login can view everything but cannot make changes">
-                            <i class="fas fa-eye"></i> Read-only
-                        </span>
+                        <a class="btn btn-sm btn-outline-primary" href="/login?next={{ request.path | urlencode }}"
+                           title="Log in as admin to make changes">
+                            <i class="fas fa-user-shield"></i> Admin login
+                        </a>
+                    </div>
+                    {% elif web_role == 'admin' %}
+                    <div class="nav-item me-3">
+                        <span class="badge bg-success me-2"><i class="fas fa-user-shield"></i> Admin</span>
+                        <a class="small" href="/logout" title="Log out of the admin session">Log out</a>
                     </div>
                     {% endif %}
                     <div class="nav-item me-3">
@@ -541,6 +547,15 @@
             </div>
         </div>
     </nav>
+
+    {% if web_role == 'viewer' %}
+    <div class="alert alert-secondary mb-0 rounded-0 border-0 border-bottom py-1 small" role="status">
+        <div class="container-fluid">
+            <i class="fas fa-eye me-1"></i> Read-only view. Changes need an
+            <a href="/login?next={{ request.path | urlencode }}">admin login</a>.
+        </div>
+    </div>
+    {% endif %}
 
     <!-- Bot Initializing Banner (shown while bot is connecting to radio at startup) -->
     <div id="init-banner"

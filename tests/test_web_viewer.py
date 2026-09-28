@@ -144,7 +144,7 @@ def auth_client(auth_viewer):
 
 @pytest.fixture
 def roles_viewer(tmp_path_factory):
-    """BotDataViewer with an admin password and a separate read-only password."""
+    """BotDataViewer with an admin password and public read-only viewing enabled."""
     tmp = tmp_path_factory.mktemp("web_viewer_roles")
     db_path = str(tmp / "test.db")
     config_path = str(tmp / "config.ini")
@@ -154,7 +154,7 @@ def roles_viewer(tmp_path_factory):
     cfg["Bot"] = {"bot_name": "TestBot", "db_path": db_path, "prefix_bytes": "1"}
     cfg["Web_Viewer"] = {
         "web_viewer_password": "adminpw",
-        "web_viewer_readonly_password": "viewerpw",
+        "web_viewer_public_readonly": "true",
     }
     cfg["Path_Command"] = {
         "graph_capture_enabled": "false",
@@ -1270,90 +1270,98 @@ class TestAuthRoutes:
 # ===========================================================================
 
 class TestWebViewerRoles:
-    """web_viewer_readonly_password: see everything, change nothing."""
+    """web_viewer_public_readonly: anyone can view, only the admin login can change."""
 
-    def _login(self, client, password):
-        return client.post("/login", data={"password": password}, follow_redirects=False)
+    def _login(self, client, password="adminpw", next_url=None):
+        url = "/login" + (f"?next={next_url}" if next_url else "")
+        return client.post(url, data={"password": password}, follow_redirects=False)
 
-    def test_both_passwords_log_in(self, roles_client):
-        assert self._login(roles_client, "adminpw").status_code == 302
-        with roles_client.session_transaction() as sess:
-            assert sess["role"] == "admin"
-        roles_client.get("/logout")
-        assert self._login(roles_client, "viewerpw").status_code == 302
-        with roles_client.session_transaction() as sess:
-            assert sess["role"] == "viewer"
+    def test_anonymous_can_read_pages_and_api(self, roles_client):
+        assert roles_client.get("/").status_code == 200
+        assert roles_client.get("/api/health").status_code == 200
 
-    def test_wrong_password_still_rejected(self, roles_client):
+    def test_anonymous_sees_admin_login_link_and_banner(self, roles_client):
+        body = roles_client.get("/").data
+        assert b"Admin login" in body
+        assert b"Read-only view" in body
+        assert b"/logout" not in body
+
+    @pytest.mark.parametrize("method", ["post", "put", "delete", "patch"])
+    def test_anonymous_write_methods_need_admin_login(self, roles_client, method):
+        resp = getattr(roles_client, method)("/api/config/logging", json={})
+        assert resp.status_code == 401
+        assert "Admin login required" in resp.get_json()["error"]
+
+    def test_anonymous_write_blocked_on_route_that_does_not_exist_yet(self, roles_client):
+        """The block is method-based, so future routes are covered without listing them."""
+        assert roles_client.post("/api/some/future/write", json={}).status_code == 401
+
+    def test_wrong_password_rejected(self, roles_client):
         resp = self._login(roles_client, "nope")
         assert resp.status_code == 200
         assert b"Invalid" in resp.data
 
-    def test_viewer_can_read_pages_and_api(self, roles_client):
-        self._login(roles_client, "viewerpw")
-        assert roles_client.get("/").status_code == 200
-        assert roles_client.get("/api/health").status_code == 200
+    def test_login_page_offers_continue_read_only(self, roles_client):
+        body = roles_client.get("/login").data
+        assert b"Continue read-only" in body
+        assert b"Admin login" in body
 
-    def test_viewer_sees_readonly_badge(self, roles_client):
-        self._login(roles_client, "viewerpw")
-        assert b"Read-only" in roles_client.get("/").data
+    def test_admin_login_redirects_back_and_unlocks_writes(self, roles_client):
+        resp = self._login(roles_client, next_url="/mesh")
+        assert resp.status_code == 302
+        assert resp.headers["Location"].endswith("/mesh")
+        with roles_client.session_transaction() as sess:
+            assert sess["role"] == "admin"
+        assert roles_client.post("/api/some/future/write", json={}).status_code != 401
 
-    def test_admin_has_no_readonly_badge(self, roles_client):
-        self._login(roles_client, "adminpw")
-        assert b"Read-only" not in roles_client.get("/").data
+    def test_admin_sees_badge_and_logout_not_login_link(self, roles_client):
+        self._login(roles_client)
+        body = roles_client.get("/").data
+        assert b"/logout" in body
+        assert b"Read-only view" not in body
 
-    @pytest.mark.parametrize("method", ["post", "put", "delete", "patch"])
-    def test_viewer_write_methods_are_refused(self, roles_client, method):
-        self._login(roles_client, "viewerpw")
-        resp = getattr(roles_client, method)("/api/config/logging", json={})
-        assert resp.status_code == 403
-        assert "Read-only" in resp.get_json()["error"]
-
-    def test_viewer_write_refused_on_route_that_does_not_exist_yet(self, roles_client):
-        """The block is method-based, so future routes are covered without listing them."""
-        self._login(roles_client, "viewerpw")
-        assert roles_client.post("/api/some/future/write", json={}).status_code == 403
-
-    def test_admin_write_is_not_blocked_by_role(self, roles_client):
-        self._login(roles_client, "adminpw")
-        resp = roles_client.post("/api/some/future/write", json={})
-        assert resp.status_code != 403
-
-    def test_viewer_cannot_read_redacted_secrets(self, roles_client):
-        self._login(roles_client, "viewerpw")
-        body = roles_client.get("/admin/config").data
-        assert b"adminpw" not in body
-        assert b"viewerpw" not in body
-
-    def test_logout_clears_role(self, roles_client):
-        self._login(roles_client, "viewerpw")
+    def test_logout_returns_to_read_only(self, roles_client):
+        self._login(roles_client)
         roles_client.get("/logout")
         with roles_client.session_transaction() as sess:
             assert "role" not in sess
-        assert roles_client.get("/api/health").status_code == 401
+        assert roles_client.get("/api/health").status_code == 200
+        assert roles_client.post("/api/some/future/write", json={}).status_code == 401
+
+    def test_anonymous_cannot_read_secrets(self, roles_client):
+        body = roles_client.get("/admin/config").data
+        assert b"adminpw" not in body
 
     def test_session_without_role_is_admin(self, roles_client):
         """Sessions created before roles existed keep working as admin."""
         with roles_client.session_transaction() as sess:
             sess["authenticated"] = True
-        assert roles_client.post("/api/some/future/write", json={}).status_code != 403
+        assert roles_client.post("/api/some/future/write", json={}).status_code != 401
 
-    def test_readonly_password_without_admin_password_is_ignored(self, tmp_path):
-        from modules.web_viewer.integration import (
-            normalized_web_viewer_password,
-            normalized_web_viewer_readonly_password,
-        )
-        cfg = configparser.ConfigParser()
-        cfg["Web_Viewer"] = {"web_viewer_readonly_password": "viewerpw"}
-        assert normalized_web_viewer_password(cfg) == ""
-        assert normalized_web_viewer_readonly_password(cfg) == "viewerpw"
+    def test_default_still_requires_login_for_everything(self, auth_client):
+        """Without web_viewer_public_readonly nothing changes for existing installs."""
+        assert auth_client.get("/api/health").status_code == 401
+        assert auth_client.get("/", follow_redirects=False).status_code == 302
 
-    @pytest.mark.parametrize("raw", ["", "none", "NULL", '""'])
-    def test_readonly_placeholder_values_mean_no_viewer_login(self, raw):
-        from modules.web_viewer.integration import normalized_web_viewer_readonly_password
+    def test_public_readonly_without_password_is_ignored(self, tmp_path):
+        db_path = str(tmp_path / "t.db")
+        config_path = str(tmp_path / "config.ini")
         cfg = configparser.ConfigParser()
-        cfg["Web_Viewer"] = {"web_viewer_readonly_password": raw}
-        assert normalized_web_viewer_readonly_password(cfg) == ""
+        cfg["Connection"] = {"connection_type": "serial", "serial_port": "/dev/ttyUSB0"}
+        cfg["Bot"] = {"bot_name": "TestBot", "db_path": db_path, "prefix_bytes": "1"}
+        cfg["Web_Viewer"] = {"web_viewer_public_readonly": "true"}
+        with open(config_path, "w") as f:
+            cfg.write(f)
+        with (
+            patch.object(BotDataViewer, "_setup_logging", _fake_setup_logging),
+            patch.object(BotDataViewer, "_start_database_polling", lambda self: None),
+            patch.object(BotDataViewer, "_start_log_tailing", lambda self: None),
+            patch.object(BotDataViewer, "_start_cleanup_scheduler", lambda self: None),
+            patch.object(BotDataViewer, "_start_dashboard_refresher", lambda self: None),
+        ):
+            v = BotDataViewer(db_path=db_path, config_path=config_path)
+        assert v.web_viewer_public_readonly is False
+        assert v._web_role() is None
 
 
 # ===========================================================================

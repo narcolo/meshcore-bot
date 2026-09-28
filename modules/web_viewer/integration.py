@@ -51,10 +51,6 @@ def normalized_web_viewer_password(config) -> str:
     return _normalized_password(config, "web_viewer_password")
 
 
-def normalized_web_viewer_readonly_password(config) -> str:
-    """Return the read-only (viewer) password, or '' when no viewer login is configured."""
-    return _normalized_password(config, "web_viewer_readonly_password")
-
 
 class BotIntegration:
     """Simple bot integration for web viewer compatibility"""

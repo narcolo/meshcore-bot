@@ -513,30 +513,30 @@ chmod +x restart_viewer.sh
 - Set `host = 0.0.0.0` for network access (use with caution)
 - For network access, set `web_viewer_password` or use a reverse proxy with authentication and firewall rules
 
-### Admin and read-only logins
+### Public read-only view with an admin login
 
-`web_viewer_password` is the admin password (full access, unchanged from before).
-Set `web_viewer_readonly_password` to add a second login that sees everything but
-cannot change anything:
+By default a configured `web_viewer_password` is required for everything. Set
+`web_viewer_public_readonly = true` to let anyone view without logging in, while only the
+admin login can change anything:
 
 ```ini
 [Web_Viewer]
 web_viewer_password = <admin password>
-web_viewer_readonly_password = <different password>
+web_viewer_public_readonly = true
 ```
 
-- One login form: the password you type decides the role.
-- A read-only session can open every page and live feed. Secrets shown on the config
-  pages stay redacted for both roles.
-- Any request that is not GET/HEAD/OPTIONS (saving settings, deleting contacts, radio
-  operations, backups, restores, ...) is refused with HTTP 403 for read-only sessions.
-  This is enforced on the server for every route, including ones added later; the
-  "Read-only" badge in the navigation bar is only a hint.
-- Read-only needs an admin password: with no `web_viewer_password` authentication is
-  off entirely and the read-only password is ignored (a warning is logged). It must also
-  differ from the admin password.
-- Browser sessions created before this feature carry no role and remain admin until they
-  expire or the user logs out.
+- Visitors see every page and live feed without a login. Secrets shown on the config
+  pages stay redacted for everyone.
+- A banner and an **Admin login** link in the navigation bar lead to the login form. After
+  logging in you get an **Admin** badge and a **Log out** link.
+- Without the admin login, any request that is not GET/HEAD/OPTIONS (saving settings,
+  deleting contacts, radio operations, backups, restores, ...) is refused with HTTP 401.
+  This is enforced on the server for every route, including ones added later; the banner and
+  link are only a hint.
+- Needs `web_viewer_password`: with no password authentication is off entirely and this
+  setting is ignored (a warning is logged).
+- Anyone who can reach the port can read logs, contacts and mesh data, so enable it only
+  where that is acceptable.
 
 ## Future Enhancements
 
