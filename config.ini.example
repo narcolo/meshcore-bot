@@ -1548,8 +1548,8 @@ message_delay_seconds = 5
 # Messages are sent in ascending numeric order (message.1, message.2, ...).
 # Add as many message.N entries as needed. {scopes} expands to
 # recommended_scopes above, in configured order.
-message.1 = Bez scope krzyczysz do studni. Nikt cię nie usłyszy. Ustaw: {scopes}.
-message.2 = Więcej nudnych szczegółów: https://meshcore.podlasie.pl
+message.1 = Bez ustawionego zakresu regionu inni mogą nie widzieć twoich wiadomości. Wybierz region: {scopes}.
+message.2 = Więcej informacji: https://meshcore.podlasie.pl
 
 [Routing_Hint_Command]
 # Notify Public-channel users who are transmitting with 1-byte routing to switch to 2-byte.
