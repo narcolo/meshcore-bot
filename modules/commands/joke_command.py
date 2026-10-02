@@ -228,8 +228,11 @@ class JokeCommand(BaseCommand):
         local_type = local_type_map.get(parts[1].lower()) if len(parts) >= 2 else None
 
         if len(parts) < 2 or local_type is not None:
-            # No category specified (or local type filter), check for seasonal defaults
-            category = self.get_seasonal_default()
+            # No category specified (or local type filter). Seasonal defaults (Spooky/Christmas)
+            # only exist as JokeAPI categories, so skip them when a local joke pool is loaded --
+            # otherwise every bare "joke" in October/December would bypass the local language
+            # jokes and fall through to the English-only API.
+            category = None if self.local_jokes else self.get_seasonal_default()
         else:
             # Category specified
             category_input = parts[1].lower()

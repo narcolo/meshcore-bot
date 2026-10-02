@@ -62,6 +62,32 @@ class TestGetSeasonalDefault:
         assert result is None
 
 
+class TestSeasonalDefaultVsLocalJokes:
+    """Regression test: seasonal defaults (Spooky/Christmas) are JokeAPI-only categories
+    and must not bypass a loaded local (non-English) joke pool."""
+
+    def test_october_uses_local_joke_not_spooky_category(self):
+        import asyncio
+        from unittest.mock import AsyncMock, patch
+
+        bot = _make_bot(seasonal=True)
+        bot.command_manager.send_response = AsyncMock(return_value=True)
+        cmd = JokeCommand(bot)
+        cmd.local_jokes = {"single": ["Dowcip po polsku"], "twopart": []}
+        msg = mock_message(content="joke", channel="general")
+
+        api_call = AsyncMock()
+        with patch.object(cmd, "get_joke_with_length_handling", api_call), \
+             patch("datetime.datetime") as mock_dt:
+            mock_dt.now.return_value = datetime(2024, 10, 15)
+            result = asyncio.run(cmd.execute(msg))
+
+        assert result is True
+        api_call.assert_not_called()
+        bot.command_manager.send_response.assert_called_once()
+        assert "Dowcip po polsku" in bot.command_manager.send_response.call_args[0][1]
+
+
 class TestFormatJoke:
     """Tests for format_joke."""
 
