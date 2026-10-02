@@ -49,6 +49,8 @@ class GlobalWxCommand(BaseCommand):
     """Handles global weather commands with city/location support"""
 
     # Plugin metadata
+    # Read-only informational output; safe for scheduled {cmd:...} rendering.
+    render_safe = True
     name = "gwx"
     keywords = ['gwx', 'globalweather', 'gwxa']
     description = "Get weather information for any global location (usage: gwx Tokyo)"
