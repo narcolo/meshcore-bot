@@ -18,7 +18,7 @@ def _config(**overrides) -> ConfigParser:
         "time": "19:00",
         "channel": "Public",
         "flood_scope": "pl-podlasie",
-        "recommended_scopes": "pl,pl-podlasie,pl-bia",
+        "recommended_scopes": "pl-podlasie,pl-bia",
         "max_message_bytes": "120",
         "message_delay_seconds": "5",
         "message.1": "Nowy w MeshCore? Ustaw scope: {scopes}.",
@@ -51,7 +51,7 @@ class TestLoadConfig:
         assert result.minute == 0
         assert result.channel == "Public"
         assert result.flood_scope == "#pl-podlasie"
-        assert result.recommended_scopes == ("pl", "pl-podlasie", "pl-bia")
+        assert result.recommended_scopes == ("pl-podlasie", "pl-bia")
         assert result.max_message_bytes == 120
         assert result.message_delay_seconds == 5.0
         assert result.message_templates == (

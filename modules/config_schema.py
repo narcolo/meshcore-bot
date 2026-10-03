@@ -288,7 +288,7 @@ SECTIONS: dict[str, SectionMeta] = {
         "time": KeyMeta(default="19:00"),
         "channel": KeyMeta(default="Public"),
         "flood_scope": KeyMeta(default="pl-podlasie"),
-        "recommended_scopes": KeyMeta(default="pl,pl-podlasie,pl-bia"),
+        "recommended_scopes": KeyMeta(default="pl-podlasie,pl-bia"),
         "max_message_bytes": KeyMeta(type="int", default="120"),
         "message_delay_seconds": KeyMeta(type="int", default="5"),
     }),

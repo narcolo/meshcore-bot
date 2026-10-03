@@ -1530,10 +1530,10 @@ flood_scope = pl-podlasie
 
 # Scopes recommended to newcomers, in priority order (highest priority
 # first). Rendered into any message.N text containing the {scopes}
-# placeholder as "pl, pl-podlasie, pl-bia". If the full list would not fit
+# placeholder as "pl-podlasie, pl-bia". If the full list would not fit
 # within max_message_bytes, trailing scopes are dropped (never partially
 # truncated) until the message fits.
-recommended_scopes = pl,pl-podlasie,pl-bia
+recommended_scopes = pl-podlasie,pl-bia
 
 # Maximum UTF-8 byte size allowed for each rendered message.N. A message
 # that cannot fit (even after {scopes} reduction) is never sent — the whole

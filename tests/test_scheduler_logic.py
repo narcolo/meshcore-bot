@@ -310,7 +310,7 @@ class TestDailyPublicNoticeScheduling:
             "time": "19:00",
             "channel": "general",
             "flood_scope": "pl-podlasie",
-            "recommended_scopes": "pl,pl-podlasie,pl-bia",
+            "recommended_scopes": "pl-podlasie,pl-bia",
             "max_message_bytes": "120",
             "message_delay_seconds": "5",
             "message.1": "Ustaw scope: {scopes}.",
