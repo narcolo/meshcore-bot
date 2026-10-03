@@ -639,6 +639,7 @@ class BaseCommand(ABC):
         command_id: str | None = None,
         skip_per_user_rate_limit: bool = False,
         record_user_rate_limit: bool = True,
+        is_error: bool = False,
     ) -> bool:
         """Unified method for sending responses to users.
 
@@ -652,6 +653,10 @@ class BaseCommand(ABC):
                 admission check; the global limiter still applies.
             record_user_rate_limit: If False, a successful send is not recorded
                 against the sender's per-user limiter.
+            is_error: Marks content as an error/usage message rather than real
+                output, so a scheduled {cmd:...} render omits it instead of
+                broadcasting it as if it were genuine output. No effect on a
+                live send -- the sender still sees it normally.
 
         Returns:
             bool: True if the response was sent successfully, False otherwise.
@@ -665,6 +670,7 @@ class BaseCommand(ABC):
                 command_id=command_id,
                 skip_per_user_rate_limit=skip_per_user_rate_limit,
                 record_user_rate_limit=record_user_rate_limit,
+                is_error=is_error,
             )
         except Exception as e:
             self.logger.error(f"Failed to send response: {e}")

@@ -456,7 +456,7 @@ class GlobalWxCommand(BaseCommand):
                     return True
                 except Exception as e:
                     self.logger.error(f"Error reading MQTT weather: {e}")
-                    await self.send_response(message, self.translate("commands.gwx.error", error=str(e)))
+                    await self.send_response(message, self.translate("commands.gwx.error", error=str(e)), is_error=True)
                     return True
 
             wxsim_source = self._get_custom_wxsim_source(None)  # Check for default
@@ -472,7 +472,7 @@ class GlobalWxCommand(BaseCommand):
                     return True
                 except Exception as e:
                     self.logger.error(f"Error fetching WXSIM weather: {e}")
-                    await self.send_response(message, self.translate('commands.gwx.error', error=str(e)))
+                    await self.send_response(message, self.translate('commands.gwx.error', error=str(e)), is_error=True)
                     return True
 
             # No custom source, try companion location
@@ -536,7 +536,7 @@ class GlobalWxCommand(BaseCommand):
                             )
                         else:
                             self.logger.debug("No companion/default city location found, showing usage")
-                        await self.send_response(message, self.translate('commands.gwx.usage'))
+                        await self.send_response(message, self.translate('commands.gwx.usage'), is_error=True)
                         return True
 
         # Check for forecast type options: "tomorrow", Nd (7d, 10d), or plain digit days 2–GWX_MULTIDAY_MAX_DAYS
@@ -573,7 +573,7 @@ class GlobalWxCommand(BaseCommand):
         location = ' '.join(location_parts).strip()
 
         if not location:
-            await self.send_response(message, self.translate('commands.gwx.usage'))
+            await self.send_response(message, self.translate('commands.gwx.usage'), is_error=True)
             return True
 
         # Custom MQTT before WXSIM
@@ -590,7 +590,7 @@ class GlobalWxCommand(BaseCommand):
                 return True
             except Exception as e:
                 self.logger.error(f"Error reading MQTT weather: {e}")
-                await self.send_response(message, self.translate("commands.gwx.error", error=str(e)))
+                await self.send_response(message, self.translate("commands.gwx.error", error=str(e)), is_error=True)
                 return True
 
         # Check for custom WXSIM source first (before normal geocoding)
@@ -611,7 +611,7 @@ class GlobalWxCommand(BaseCommand):
                 return True
             except Exception as e:
                 self.logger.error(f"Error fetching WXSIM weather: {e}")
-                await self.send_response(message, self.translate('commands.gwx.error', error=str(e)))
+                await self.send_response(message, self.translate('commands.gwx.error', error=str(e)), is_error=True)
                 return True
 
         try:
@@ -633,17 +633,25 @@ class GlobalWxCommand(BaseCommand):
 
                 # Send alerts
                 await self.send_response(message, weather_data[2])
-            elif forecast_type == "multiday":
-                # Use message splitting for multi-day forecasts
-                await self._send_multiday_forecast(message, weather_data)
             else:
-                await self.send_response(message, weather_data)
+                # get_weather_for_location returns the bare translated error string
+                # (not prefixed with a location) on failure -- same sentinel check
+                # used internally at the no_location/error_fetching_api boundary.
+                is_err = weather_data in (
+                    self.translate('commands.gwx.error_fetching_api'),
+                    self.translate('commands.gwx.no_location', location=location),
+                )
+                if forecast_type == "multiday":
+                    # Use message splitting for multi-day forecasts
+                    await self._send_multiday_forecast(message, weather_data, is_error=is_err)
+                else:
+                    await self.send_response(message, weather_data, is_error=is_err)
 
             return True
 
         except Exception as e:
             self.logger.error(f"Error in global weather command: {e}")
-            await self.send_response(message, self.translate('commands.gwx.error', error=str(e)))
+            await self.send_response(message, self.translate('commands.gwx.error', error=str(e)), is_error=True)
             return True
 
     async def get_weather_for_location(self, location: str, forecast_type: str = "default", num_days: int = 7, message: MeshMessage = None) -> Union[str, tuple[str, str, str]]:
@@ -1316,12 +1324,15 @@ class GlobalWxCommand(BaseCommand):
         """Count UTF-8 byte length of text. Matches RF packet byte limit from get_max_message_length()."""
         return len(text.encode('utf-8'))
 
-    async def _send_multiday_forecast(self, message: MeshMessage, forecast_text: str) -> None:
+    async def _send_multiday_forecast(self, message: MeshMessage, forecast_text: str, is_error: bool = False) -> None:
         """Send multi-day forecast response, splitting into multiple messages if needed.
 
         Args:
             message: The original message (for reply context).
             forecast_text: The full forecast text (lines separated by \n).
+            is_error: Forwarded to send_response -- True when forecast_text is
+                actually an error/usage sentinel, not a real forecast (always
+                single-line, so it only ever takes the early-return branch below).
         """
         import asyncio
 
@@ -1338,7 +1349,7 @@ class GlobalWxCommand(BaseCommand):
 
         # If single line and under max_length chars, send as-is
         if self._count_display_width(forecast_text) <= max_length:
-            await self.send_response(message, forecast_text)
+            await self.send_response(message, forecast_text, is_error=is_error)
             return
 
         # Multi-line message - try to fit as many days as possible in one message

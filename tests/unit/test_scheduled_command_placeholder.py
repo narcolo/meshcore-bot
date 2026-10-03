@@ -32,6 +32,9 @@ def _make_manager(bot, commands):
     mgr.logger = MagicMock()
     mgr.commands = commands
     mgr._last_response = None
+    # Retries are real behavior worth exercising, but these tests don't care about
+    # wall-clock time between attempts.
+    mgr.RENDER_RETRY_DELAY_SECONDS = 0
     return mgr
 
 
@@ -126,6 +129,44 @@ class TestRenderCommandOutput:
         quiet = _make_command(name="quiet", keywords=["quiet"], reply=None)
         mgr = _make_manager(mock_bot, {"quiet": quiet})
         assert await mgr.render_command_output("quiet") is None
+
+    @pytest.mark.asyncio
+    async def test_retries_and_stops_at_first_success(self, mock_bot):
+        """A transient failure (e.g. an upstream API hiccup) must not sink the
+        whole render -- it should retry and use the first attempt that works."""
+        flaky = _make_command(name="flaky", keywords=["flaky"], reply=None)
+        calls = []
+
+        async def flaky_execute(message):
+            calls.append(1)
+            if len(calls) < 3:
+                raise RuntimeError("transient upstream error")
+            message.capture_sink.append("third time's the charm")
+            return True
+
+        flaky.execute = flaky_execute
+        mgr = _make_manager(mock_bot, {"flaky": flaky})
+        assert await mgr.render_command_output("flaky") == "third time's the charm"
+        assert len(calls) == 3
+        # Only the first two (of up to RENDER_RETRY_MAX_ATTEMPTS) were needed.
+        assert len(calls) < mgr.RENDER_RETRY_MAX_ATTEMPTS
+
+    @pytest.mark.asyncio
+    async def test_gives_up_after_max_attempts_and_logs_error(self, mock_bot):
+        """A persistently failing command must stop after RENDER_RETRY_MAX_ATTEMPTS,
+        not retry forever, and the give-up must be logged at error level."""
+        broken = _make_command(name="broken", keywords=["broken"], reply=None)
+        calls = []
+
+        async def always_fails(message):
+            calls.append(1)
+            raise RuntimeError("still broken")
+
+        broken.execute = always_fails
+        mgr = _make_manager(mock_bot, {"broken": broken})
+        assert await mgr.render_command_output("broken") is None
+        assert len(calls) == mgr.RENDER_RETRY_MAX_ATTEMPTS
+        mgr.logger.error.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_multiple_sends_are_joined(self, mock_bot):
