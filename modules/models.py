@@ -60,6 +60,12 @@ class MeshMessage:
     # can be run for its text alone (e.g. a {cmd:...} placeholder in a scheduled
     # message) without spending airtime. A synthetic message only.
     capture_sink: Optional[list[str]] = None
+    # Transient: set by CommandManager.send_response when a capture-only call is
+    # marked is_error=True, so render_command_output can tell a scheduled
+    # {cmd:...} placeholder "the command ran but only produced an error/usage
+    # message" apart from "the command produced real content" -- the former
+    # should not be broadcast. A synthetic message only.
+    capture_error: bool = False
     # On-air body at construction. Mention/prefix cleanup may rewrite ``content``
     # for command matching; display and web-viewer capture must use this snapshot.
     original_content: str = ""

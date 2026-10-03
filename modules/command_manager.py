@@ -1691,6 +1691,7 @@ class CommandManager:
         command_id: str | None = None,
         skip_per_user_rate_limit: bool = False,
         record_user_rate_limit: bool = True,
+        is_error: bool = False,
     ) -> bool:
         """Unified method for sending responses to users.
 
@@ -1707,6 +1708,11 @@ class CommandManager:
                 admission check; the global limiter still applies.
             record_user_rate_limit: If False, a successful send is not recorded
                 against the sender's per-user limiter.
+            is_error: Marks content as an error/usage message rather than real
+                output. A live sender still sees it normally; it only changes
+                behavior for a capture-only render (see render_command_output),
+                where it is dropped instead of being broadcast as if it were
+                genuine command output.
 
         Returns:
             bool: True if response was sent successfully, False otherwise.
@@ -1716,7 +1722,10 @@ class CommandManager:
             # transmit nothing. Checked before _last_response so a background render
             # cannot overwrite the response captured for a real user's command.
             if getattr(message, 'capture_sink', None) is not None:
-                message.capture_sink.append(content)
+                if is_error:
+                    message.capture_error = True
+                else:
+                    message.capture_sink.append(content)
                 return True
 
             # Store the response content for web viewer capture
@@ -1902,6 +1911,14 @@ class CommandManager:
                 return command
         return None
 
+    # A render failure is almost always a transient upstream API hiccup (the kind
+    # ``_create_retry_session`` papers over at the HTTP layer for weather_service's
+    # own internal fetches), not a reason to give up for the rest of the day. Retry
+    # a handful of times, spaced out enough for a brief outage to clear, before
+    # logging it as a real failure and leaving the schedule's placeholder empty.
+    RENDER_RETRY_MAX_ATTEMPTS = 5
+    RENDER_RETRY_DELAY_SECONDS = 10.0
+
     async def render_command_output(
         self,
         spec: str,
@@ -1915,15 +1932,22 @@ class CommandManager:
         broadcast the output of any command on a cron schedule instead of each service
         growing its own schedule parser.
 
+        Retries up to ``RENDER_RETRY_MAX_ATTEMPTS`` times (spaced
+        ``RENDER_RETRY_DELAY_SECONDS`` apart) when the command times out, raises, or
+        only produces an error/usage message -- stopping at the first attempt that
+        produces real output. The command's cooldown/record_execution is only
+        consulted once, before the first attempt, so retries are never blocked by
+        the command's own per-use cooldown.
+
         Args:
             spec: Full invocation as an operator would type it, e.g. ``wx Seattle``.
             channel: Channel the rendered text is destined for, so channel-scoped
                 behavior in the command sees the right context.
-            timeout: Seconds to wait before abandoning the render.
+            timeout: Seconds to wait before abandoning each attempt.
 
         Returns:
             The reply text, or None when the command is unknown, disabled, admin-only,
-            not renderable, times out, or produces nothing.
+            not renderable, or every attempt timed out/failed/produced nothing.
         """
         spec = (spec or "").strip()
         if not spec:
@@ -1975,36 +1999,45 @@ class CommandManager:
         # render cannot be retried straight past the cooldown.
         command.record_execution()
 
-        sink: list[str] = []
-        synthetic = MeshMessage(
-            content=spec,
-            sender_id=None,
-            channel=channel,
-            is_dm=False,
-            timestamp=int(time.time()),
-            capture_sink=sink,
-        )
+        for attempt in range(1, self.RENDER_RETRY_MAX_ATTEMPTS + 1):
+            sink: list[str] = []
+            synthetic = MeshMessage(
+                content=spec,
+                sender_id=None,
+                channel=channel,
+                is_dm=False,
+                timestamp=int(time.time()),
+                capture_sink=sink,
+            )
 
-        try:
-            await asyncio.wait_for(command.execute(synthetic), timeout=timeout)
-        except asyncio.TimeoutError:
-            self.logger.warning(
-                "Scheduled {cmd:...} placeholder: %r timed out after %ss", command_name, timeout
-            )
-            return None
-        except Exception as e:
-            self.logger.warning(
-                "Scheduled {cmd:...} placeholder: %r failed: %s: %s",
-                command_name, type(e).__name__, e,
-            )
-            return None
+            failure_reason: str | None = None
+            try:
+                await asyncio.wait_for(command.execute(synthetic), timeout=timeout)
+                if synthetic.capture_error:
+                    failure_reason = "produced only an error/usage message"
+                elif not sink:
+                    failure_reason = "produced no output"
+            except asyncio.TimeoutError:
+                failure_reason = f"timed out after {timeout}s"
+            except Exception as e:
+                failure_reason = f"failed: {type(e).__name__}: {e}"
 
-        if not sink:
-            self.logger.warning(
-                "Scheduled {cmd:...} placeholder: %r produced no output", command_name
-            )
-            return None
-        return "\n".join(part for part in sink if part)
+            if failure_reason is None:
+                return "\n".join(part for part in sink if part)
+
+            if attempt < self.RENDER_RETRY_MAX_ATTEMPTS:
+                self.logger.warning(
+                    "Scheduled {cmd:...} placeholder: %r %s (attempt %d/%d); retrying in %.0fs",
+                    command_name, failure_reason, attempt, self.RENDER_RETRY_MAX_ATTEMPTS,
+                    self.RENDER_RETRY_DELAY_SECONDS,
+                )
+                await asyncio.sleep(self.RENDER_RETRY_DELAY_SECONDS)
+            else:
+                self.logger.error(
+                    "Scheduled {cmd:...} placeholder: %r %s; giving up after %d attempts",
+                    command_name, failure_reason, self.RENDER_RETRY_MAX_ATTEMPTS,
+                )
+                return None
 
     async def execute_commands(self, message):
         """Execute command objects that handle their own responses.
