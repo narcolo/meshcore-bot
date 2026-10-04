@@ -38,6 +38,24 @@ from ...clients.mqtt_weather import (
 # Multiday: plain digits, 7day/7-day, or suffix form 7d/10d (min 2, max below). Open-Meteo allows up to 16 forecast days.
 GWX_MULTIDAY_MAX_DAYS = 16
 
+# WMO weather codes (see _get_weather_description/_get_weather_emoji) used by the
+# "daily" full-day summary's advice-line thresholds.
+GWX_THUNDERSTORM_CODES = frozenset({95, 96, 99})
+GWX_SNOW_CODES = frozenset({71, 73, 75, 77, 85, 86})
+
+# Daily-summary advice thresholds. These assume the bot's configured units are
+# metric (km/h wind, mm precipitation, °C temperature) -- the thresholds are not
+# converted for a bot configured in imperial units, since this feature targets a
+# single fixed deployment where [Weather] is already celsius/kmh/mm.
+GWX_DAILY_HEAVY_RAIN_SUM_MM = 5
+GWX_DAILY_HEAVY_RAIN_HOURLY_MM = 2
+GWX_DAILY_STRONG_GUST_KMH = 45
+GWX_DAILY_COLD_FEELS_LIKE_C = 0
+GWX_DAILY_UMBRELLA_MM = 1
+GWX_DAILY_UMBRELLA_PROB_PERCENT = 50
+GWX_DAILY_PRECIP_HOUR_MM = 0.1
+GWX_DAILY_PRECIP_HOUR_PROB_PERCENT = 50
+
 MI_TO_KM = 1.609344
 HPA_TO_MMHG = 0.750062
 # Past ~20 mi / 32 km, visibility is reported as unlimited anyway.
@@ -246,6 +264,8 @@ class GlobalWxCommand(BaseCommand):
         forecast_type: str,
         location_name: Optional[str],
     ) -> str:
+        if forecast_type == "daily":
+            return self.translate("commands.gwx.daily_summary.not_supported_custom_source")
         if forecast_type != "default":
             return self.translate("commands.gwx.mqtt_forecast_not_supported")
 
@@ -322,6 +342,9 @@ class GlobalWxCommand(BaseCommand):
         """
         if not self.wxsim_parser:
             return self.translate('commands.gwx.error', error="WXSIM parser not available")
+
+        if forecast_type == "daily":
+            return self.translate('commands.gwx.daily_summary.not_supported_custom_source')
 
         # Fetch WXSIM data
         text = self.wxsim_parser.fetch_from_url(source_url, timeout=self.url_timeout)
@@ -445,13 +468,22 @@ class GlobalWxCommand(BaseCommand):
         # Parse the command to extract location and forecast type
         parts = content.split()
 
+        # "gwx daily" (no location) is the full-day forecast summary for the
+        # default location -- same default_city/companion/bot-location
+        # fallback as a bare "gwx" below, so capture the modifier before the
+        # no-location branch treats "daily" as a location token.
+        forced_forecast_type = None
+        if len(parts) == 2 and parts[1].lower() == "daily":
+            forced_forecast_type = "daily"
+            parts = parts[:1]
+
         # If no location specified, check custom MQTT then WXSIM default sources
         if len(parts) < 2:
             mqtt_topic = self._get_custom_mqtt_weather_topic(None)
             if mqtt_topic:
                 try:
                     self.record_execution(message.sender_id)
-                    weather_data = self._mqtt_weather_line(mqtt_topic, "default", None)
+                    weather_data = self._mqtt_weather_line(mqtt_topic, forced_forecast_type or "default", None)
                     await self.send_response(message, weather_data)
                     return True
                 except Exception as e:
@@ -466,7 +498,7 @@ class GlobalWxCommand(BaseCommand):
                     self.record_execution(message.sender_id)
                     # Blocking HTTP fetch of the WXSIM plaintext file.
                     weather_data = await asyncio.to_thread(
-                        self._get_wxsim_weather, wxsim_source, "default", 7, message
+                        self._get_wxsim_weather, wxsim_source, forced_forecast_type or "default", 7, message
                     )
                     await self.send_response(message, weather_data)
                     return True
@@ -550,6 +582,9 @@ class GlobalWxCommand(BaseCommand):
             if last_part == "tomorrow":
                 forecast_type = "tomorrow"
                 location_parts = location_parts[:-1]
+            elif last_part == "daily":
+                forecast_type = "daily"
+                location_parts = location_parts[:-1]
             elif last_part in ["7day", "7-day"]:
                 forecast_type = "multiday"
                 num_days = 7
@@ -568,6 +603,13 @@ class GlobalWxCommand(BaseCommand):
                         forecast_type = "multiday"
                         num_days = days
                         location_parts = location_parts[:-1]
+
+        # A "daily" modifier captured before the no-location branch (bare
+        # "gwx daily") never went through the suffix detection above, so it
+        # would otherwise be lost once that branch fills in the default
+        # location's tokens.
+        if forced_forecast_type:
+            forecast_type = forced_forecast_type
 
         # Join remaining parts to handle "city, country" format
         location = ' '.join(location_parts).strip()
@@ -659,7 +701,8 @@ class GlobalWxCommand(BaseCommand):
 
         Args:
             location: The location (city name, etc.).
-            forecast_type: "default", "tomorrow", or "multiday".
+            forecast_type: "default", "tomorrow", "multiday", or "daily" (a
+                full-day summary; see get_open_meteo_daily_summary).
             num_days: Number of days for multiday forecast (2–16).
             message: The MeshMessage for dynamic length calculation.
 
@@ -693,6 +736,14 @@ class GlobalWxCommand(BaseCommand):
             # Format location name for display
             location_display = self._format_location_display(address_info, geocode_result, location)
             self.logger.debug(f"Formatted location_display: '{location_display}' from location: '{location}'")
+
+            if forecast_type == "daily":
+                # Full-day summary builds its own compact multi-line message
+                # (header + lines), so it's returned as-is rather than
+                # wrapped in the "City, CC: " prefix the other types get
+                # below -- and uses the bare city name in its own header.
+                city_name = location_display.split(',')[0].strip()
+                return self.get_open_meteo_daily_summary(lat, lon, city_name, message=message)
 
             # Calculate the length of the location prefix (location_display + ": ")
             location_prefix_len = len(f"{location_display}: ")
@@ -1319,6 +1370,207 @@ class GlobalWxCommand(BaseCommand):
         except Exception as e:
             self.logger.error(f"Error formatting {num_days}-day forecast: {e}")
             return self.translate('commands.gwx.multiday_error', num_days=num_days)
+
+    def get_open_meteo_daily_summary(
+        self, lat: float, lon: float, city_name: str, message: MeshMessage = None,
+    ) -> str:
+        """Fetch and format a full-day forecast summary ("daily" forecast type).
+
+        Unlike the "default" forecast type (current conditions + today's
+        high/low + a one-line tomorrow preview), this summarizes the whole of
+        *today* in one compact multi-line message: temperature range, main
+        condition, precipitation window, wind, and a single advice line. Built
+        for the scheduled morning info-channel announcement
+        (``{cmd:gwx daily}``), but also reachable interactively as
+        ``gwx <location> daily``.
+
+        Args:
+            lat: Latitude.
+            lon: Longitude.
+            city_name: Bare city name for the message header (no country code).
+            message: The MeshMessage for dynamic length calculation.
+
+        Returns:
+            str: The formatted multi-line summary, or a translated error
+            string (never a partial/broken message) on failure.
+        """
+        max_length = self.get_max_message_length(message) if message else 140
+        try:
+            api_url = "https://api.open-meteo.com/v1/forecast"
+            params = {
+                'latitude': lat,
+                'longitude': lon,
+                'daily': (
+                    'weather_code,temperature_2m_max,temperature_2m_min,'
+                    'apparent_temperature_max,apparent_temperature_min,'
+                    'precipitation_sum,precipitation_probability_max,'
+                    'wind_speed_10m_max,wind_gusts_10m_max,'
+                    'wind_direction_10m_dominant,snowfall_sum'
+                ),
+                'hourly': 'precipitation,precipitation_probability',
+                'temperature_unit': self.temperature_unit,
+                'wind_speed_unit': self.wind_speed_unit,
+                'precipitation_unit': self.precipitation_unit,
+                'timezone': 'auto',
+                # Today only -- the summary never covers tomorrow.
+                'forecast_days': 1,
+            }
+            if self.weather_model:
+                params['models'] = self.weather_model
+
+            response = requests.get(api_url, params=params, timeout=self.url_timeout)
+            if not response.ok:
+                self.logger.warning(f"Error fetching Open-Meteo daily summary: {response.status_code}")
+                return self.translate('commands.gwx.error_fetching_api')
+
+            data = response.json()
+            daily = data.get('daily', {})
+            hourly = data.get('hourly', {})
+            if not daily.get('temperature_2m_max') or not daily.get('temperature_2m_min'):
+                self.logger.warning("Open-Meteo daily summary response missing required daily fields")
+                return self.translate('commands.gwx.error_fetching_api')
+
+            return self._build_daily_summary_text(daily, hourly, city_name, max_length)
+
+        except Exception as e:
+            self.logger.error(f"Error fetching Open-Meteo daily summary: {e}")
+            return self.translate('commands.gwx.error_fetching_api')
+
+    def _build_daily_summary_text(self, daily: dict, hourly: dict, city_name: str, max_length: int) -> str:
+        """Build the compact multi-line text from a daily-summary API response.
+
+        Degrades gracefully when the full message would not fit
+        ``max_length``: drops the apparent-temperature clause first, then the
+        precipitation hour window. The advice line is never dropped.
+        """
+        temp_symbol = "°F" if self.temperature_unit == 'fahrenheit' else "°C"
+
+        code = daily['weather_code'][0]
+        temp_max = daily['temperature_2m_max'][0]
+        temp_min = daily['temperature_2m_min'][0]
+        feels_max = (daily.get('apparent_temperature_max') or [None])[0]
+        feels_min = (daily.get('apparent_temperature_min') or [None])[0]
+
+        precip_prob = (daily.get('precipitation_probability_max') or [0])[0] or 0
+        precip_amount = (daily.get('precipitation_sum') or [0])[0] or 0
+        snowfall = (daily.get('snowfall_sum') or [0])[0] or 0
+        gust = (daily.get('wind_gusts_10m_max') or [0])[0] or 0
+        wind_speed = (daily.get('wind_speed_10m_max') or [0])[0] or 0
+        wind_dir_deg = (daily.get('wind_direction_10m_dominant') or [None])[0]
+
+        header = self.translate('commands.gwx.daily_summary.header', city=city_name)
+
+        temp_line = self.translate(
+            'commands.gwx.daily_summary.temp_line',
+            low=round(temp_min), high=round(temp_max), unit=temp_symbol,
+        )
+        feels_suffix = None
+        if feels_min is not None and feels_max is not None:
+            feels_suffix = self.translate(
+                'commands.gwx.daily_summary.feels_suffix',
+                low=round(feels_min), high=round(feels_max),
+            )
+
+        emoji = self._get_weather_emoji(code)
+        desc = self._get_weather_description(code).lower()
+        condition_line = f"{emoji} {desc}"
+
+        precip_window = self._precipitation_window(hourly)
+        precip_line = self.translate(
+            'commands.gwx.daily_summary.precip_line',
+            prob=round(precip_prob), amount=self._format_precip_amount(precip_amount),
+        )
+
+        wind_line = self.translate(
+            'commands.gwx.daily_summary.wind_line',
+            direction=self._degrees_to_direction(wind_dir_deg) if wind_dir_deg is not None else "",
+            speed=round(wind_speed),
+        )
+        if gust > wind_speed + 3:
+            wind_line += " " + self.translate('commands.gwx.gust', value=round(gust))
+
+        advice_line = self._select_advice_line(
+            code=code,
+            precip_amount=precip_amount,
+            precip_prob=precip_prob,
+            hourly_precip=hourly.get('precipitation') or [],
+            gust=gust,
+            snowfall=snowfall,
+            feels_min=feels_min,
+        )
+
+        def render(include_feels: bool, include_window: bool) -> str:
+            temp = temp_line + (f"{feels_suffix}" if include_feels and feels_suffix else "")
+            precip = precip_line
+            if include_window and precip_window:
+                precip += f" {precip_window[0]}–{precip_window[1]}"
+            return "\n".join([header, temp, condition_line, precip, wind_line, advice_line])
+
+        text = render(include_feels=True, include_window=True)
+        if self._count_display_width(text) > max_length:
+            text = render(include_feels=False, include_window=True)
+        if self._count_display_width(text) > max_length:
+            text = render(include_feels=False, include_window=False)
+        return text
+
+    def _precipitation_window(self, hourly: dict) -> Optional[tuple[int, int]]:
+        """Main precipitation hour window for today, e.g. (12, 17), or None.
+
+        Finds the first and last hour (0-23, local time) where precipitation
+        is actually expected, per GWX_DAILY_PRECIP_HOUR_MM/_PROB_PERCENT.
+        Gaps in between are not reported as separate windows -- a single
+        overall span is simpler and matches the compact format.
+        """
+        precip = hourly.get('precipitation') or []
+        prob = hourly.get('precipitation_probability') or []
+        hours = []
+        for i in range(min(24, max(len(precip), len(prob)))):
+            p = precip[i] if i < len(precip) else 0
+            pr = prob[i] if i < len(prob) else 0
+            if (p or 0) >= GWX_DAILY_PRECIP_HOUR_MM or (pr or 0) >= GWX_DAILY_PRECIP_HOUR_PROB_PERCENT:
+                hours.append(i)
+        if not hours:
+            return None
+        return hours[0], hours[-1]
+
+    def _format_precip_amount(self, amount: float) -> str:
+        unit = "in" if self.precipitation_unit == 'inch' else "mm"
+        if (amount or 0) < 1:
+            return self.translate('commands.gwx.daily_summary.precip_amount_lt1', unit=unit)
+        return self.translate('commands.gwx.daily_summary.precip_amount', value=round(amount), unit=unit)
+
+    def _select_advice_line(
+        self, *, code: int, precip_amount: float, precip_prob: float,
+        hourly_precip: list, gust: float, snowfall: float, feels_min: Optional[float],
+    ) -> str:
+        """Pick the single advice line, in the documented priority order.
+
+        Thunderstorm > heavy rain > strong gusts > snow > cold > umbrella >
+        calm -- the first matching condition wins, so only one line is ever
+        returned (there must always be exactly one).
+        """
+        base = 'commands.gwx.daily_summary.advice.'
+
+        if code in GWX_THUNDERSTORM_CODES:
+            return self.translate(base + 'thunderstorm')
+
+        heavy_hourly = any((p or 0) >= GWX_DAILY_HEAVY_RAIN_HOURLY_MM for p in hourly_precip)
+        if (precip_amount or 0) >= GWX_DAILY_HEAVY_RAIN_SUM_MM or heavy_hourly:
+            return self.translate(base + 'heavy_rain')
+
+        if (gust or 0) >= GWX_DAILY_STRONG_GUST_KMH:
+            return self.translate(base + 'strong_gusts')
+
+        if (snowfall or 0) > 0 or code in GWX_SNOW_CODES:
+            return self.translate(base + 'snow')
+
+        if feels_min is not None and feels_min <= GWX_DAILY_COLD_FEELS_LIKE_C:
+            return self.translate(base + 'cold')
+
+        if (precip_amount or 0) >= GWX_DAILY_UMBRELLA_MM or (precip_prob or 0) >= GWX_DAILY_UMBRELLA_PROB_PERCENT:
+            return self.translate(base + 'umbrella')
+
+        return self.translate(base + 'calm')
 
     def _count_display_width(self, text: str) -> int:
         """Count UTF-8 byte length of text. Matches RF packet byte limit from get_max_message_length()."""

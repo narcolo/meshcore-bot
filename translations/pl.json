@@ -317,6 +317,25 @@
         "thunderstorms": "⚠️ Burza z piorunami",
         "heavy_snow": "⚠️ Śnieżyca",
         "high_winds": "⚠️ Silne wiatry ({wind_speed} km/h)"
+      },
+      "daily_summary": {
+        "header": "📍 {city} dziś",
+        "temp_line": "🌡 {low}–{high}{unit}",
+        "feels_suffix": ", odcz. {low}–{high}",
+        "precip_line": "🌧 {prob}%/{amount}",
+        "precip_amount": "{value}{unit}",
+        "precip_amount_lt1": "<1{unit}",
+        "wind_line": "💨 {direction}{speed}",
+        "not_supported_custom_source": "Pełna prognoza dnia nie jest dostępna dla tego źródła pogody",
+        "advice": {
+          "thunderstorm": "⚡ Możliwe burze",
+          "heavy_rain": "☔ Silny deszcz",
+          "strong_gusts": "🌬️ Silne porywy",
+          "snow": "❄️ Możliwy śnieg",
+          "cold": "🧤 Zimno",
+          "umbrella": "☂️ Weź parasol",
+          "calm": "✅ Spokojna pogoda"
+        }
       }
     },
     "sports": {

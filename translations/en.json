@@ -311,7 +311,26 @@
         "heavy_snow": "⚠️ Heavy snow",
         "high_winds": "⚠️ High winds ({wind_speed} mph)"
       },
-      "pressure_unit": "hpa"
+      "pressure_unit": "hpa",
+      "daily_summary": {
+        "header": "📍 {city} today",
+        "temp_line": "🌡 {low}–{high}{unit}",
+        "feels_suffix": ", feels {low}–{high}",
+        "precip_line": "🌧 {prob}%/{amount}",
+        "precip_amount": "{value}{unit}",
+        "precip_amount_lt1": "<1{unit}",
+        "wind_line": "💨 {direction}{speed}",
+        "not_supported_custom_source": "The full-day forecast isn't available for this weather source",
+        "advice": {
+          "thunderstorm": "⚡ Possible storms",
+          "heavy_rain": "☔ Heavy rain",
+          "strong_gusts": "🌬️ Strong gusts",
+          "snow": "❄️ Possible snow",
+          "cold": "🧤 Cold",
+          "umbrella": "☂️ Take an umbrella",
+          "calm": "✅ Calm weather"
+        }
+      }
     },
     "sports": {
       "description": "Get sports scores and schedules (usage: sports [team/league])",
