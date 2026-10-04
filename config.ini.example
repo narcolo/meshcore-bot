@@ -640,6 +640,13 @@ category.funfact = fun
 #   */30 * * * *    = Public:Conditions: {cmd:wx 98101}
 #       Every 30 minutes, with surrounding text.
 #   @hourly         = Public:{cmd:aqi Tacoma}
+#   0 8 * * *       = #info:{cmd:gwx daily}
+#       Full-day forecast summary (today's temperature range, condition,
+#       precipitation window, wind, and one advice line) for gwx's configured
+#       default_city, once a day. "gwx <location> daily" also works with an
+#       explicit location. This is different from a bare {cmd:gwx}, which is
+#       current conditions plus a one-line tomorrow preview, not a full-day
+#       summary. Not supported for custom MQTT/WXSIM weather sources.
 #
 # The command name is matched against command names and their keywords, so
 # {cmd:weather Seattle} and {cmd:wx Seattle} are equivalent. Arguments are passed
