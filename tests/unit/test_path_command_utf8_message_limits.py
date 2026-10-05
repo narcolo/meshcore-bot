@@ -155,6 +155,33 @@ class TestPathCommandReplyPrefix:
         second = path_cmd.send_response.call_args_list[1][0][1]
         assert not second.startswith("P:\n")
 
+    @pytest.mark.asyncio
+    async def test_no_reply_prefix_falls_back_to_inline_sender_tag(self, path_cmd, mock_bot):
+        """Lost once already during an upstream sync (see CLAUDE.md) - regression guard.
+
+        With no Path_Command.reply_prefix configured, Path must fall back to the
+        same inline "@[sender] " tag trace_command uses, not a separate header line.
+        """
+        path_cmd.path_reply_prefix = ""
+        path_cmd.get_max_message_length = lambda _msg: 200
+        msg = MeshMessage(content="path", channel="general", is_dm=False, sender_id="alice")
+        await path_cmd._send_path_response(msg, "line1")
+        path_cmd.send_response.assert_awaited_once()
+        payload = path_cmd.send_response.call_args[0][1]
+        assert payload == "@[alice] line1"
+        assert path_cmd.last_response == "@[alice] line1"
+
+    @pytest.mark.asyncio
+    async def test_configured_reply_prefix_overrides_sender_fallback(self, path_cmd, mock_bot):
+        """An explicit Path_Command.reply_prefix wins outright - no stacked fallback tag."""
+        path_cmd.path_reply_prefix = "[{sender}]"
+        path_cmd.get_max_message_length = lambda _msg: 200
+        msg = MeshMessage(content="path", channel="general", is_dm=False, sender_id="alice")
+        await path_cmd._send_path_response(msg, "line1")
+        payload = path_cmd.send_response.call_args[0][1]
+        assert payload == "[alice]\nline1"
+        assert "@[alice]" not in payload
+
 
 class MockTranslateForSend:
     def __call__(self, key: str, **kwargs):

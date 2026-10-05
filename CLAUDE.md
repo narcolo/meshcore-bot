@@ -102,3 +102,16 @@ INI-based (`config.ini`). Key sections: `[Connection]`, `[Bot]`, `[Channels]`, `
 - Config validation tool: `python3 validate_config.py`
 - DB backup utility: `python3 backup_database.py`
 - Docs built with MkDocs Material (`mkdocs.yml`), source in `docs/`
+
+## Path Command Sender Tag
+
+`PathCommand._send_path_response` (`modules/commands/path_command.py`) falls back to
+trace_command's inline `@[sender] ` tag whenever `Path_Command.reply_prefix` isn't
+configured. This fork-only fallback was silently lost once already during the big
+upstream-sync merge (`882930a`, 2026-09-27), when upstream's own rewrite of
+`_format_path_reply_prefix`/`_send_path_response` fully replaced the fork's version
+with no merge conflict. It's covered by a regression test
+(`tests/unit/test_path_command_utf8_message_limits.py::TestPathCommandReplyPrefix::
+test_no_reply_prefix_falls_back_to_inline_sender_tag`) — if a future upstream sync
+wholesale-replaces `path_command.py` again, that test should fail loudly instead of
+the fallback silently disappearing for months.
