@@ -1065,9 +1065,9 @@ class PathCommand(BaseCommand):
         """Send path response, splitting into multiple messages if necessary"""
         prefix = await self._format_path_reply_prefix(message)
         if not prefix:
-            # No configured reply_prefix: fall back to trace_command's inline
-            # "@[sender] " tag (see CLAUDE.md for why this needs a regression test).
-            prefix = f"@[{message.sender_id}] "
+            # No configured reply_prefix: fall back to a "@[sender]" tag
+            # (see CLAUDE.md for why this needs a regression test).
+            prefix = f"@[{message.sender_id}]\n"
         self.last_response = prefix + response if prefix else response
 
         max_length = self.get_max_message_length(message)

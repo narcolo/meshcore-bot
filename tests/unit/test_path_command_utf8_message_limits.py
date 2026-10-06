@@ -159,8 +159,8 @@ class TestPathCommandReplyPrefix:
     async def test_no_reply_prefix_falls_back_to_inline_sender_tag(self, path_cmd, mock_bot):
         """Lost once already during an upstream sync (see CLAUDE.md) - regression guard.
 
-        With no Path_Command.reply_prefix configured, Path must fall back to the
-        same inline "@[sender] " tag trace_command uses, not a separate header line.
+        With no Path_Command.reply_prefix configured, Path must fall back to a
+        "@[sender]" tag on its own line above the response.
         """
         path_cmd.path_reply_prefix = ""
         path_cmd.get_max_message_length = lambda _msg: 200
@@ -168,8 +168,8 @@ class TestPathCommandReplyPrefix:
         await path_cmd._send_path_response(msg, "line1")
         path_cmd.send_response.assert_awaited_once()
         payload = path_cmd.send_response.call_args[0][1]
-        assert payload == "@[alice] line1"
-        assert path_cmd.last_response == "@[alice] line1"
+        assert payload == "@[alice]\nline1"
+        assert path_cmd.last_response == "@[alice]\nline1"
 
     @pytest.mark.asyncio
     async def test_configured_reply_prefix_overrides_sender_fallback(self, path_cmd, mock_bot):

@@ -106,8 +106,8 @@ INI-based (`config.ini`). Key sections: `[Connection]`, `[Bot]`, `[Channels]`, `
 ## Path Command Sender Tag
 
 `PathCommand._send_path_response` (`modules/commands/path_command.py`) falls back to
-trace_command's inline `@[sender] ` tag whenever `Path_Command.reply_prefix` isn't
-configured. This fork-only fallback was silently lost once already during the big
+a `@[sender]` tag on its own line above the response whenever `Path_Command.reply_prefix`
+isn't configured. This fork-only fallback was silently lost once already during the big
 upstream-sync merge (`882930a`, 2026-09-27), when upstream's own rewrite of
 `_format_path_reply_prefix`/`_send_path_response` fully replaced the fork's version
 with no merge conflict. It's covered by a regression test
