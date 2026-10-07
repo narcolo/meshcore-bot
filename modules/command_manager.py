@@ -1473,6 +1473,10 @@ class CommandManager:
         provided skip_user_rate_limit and rate_limit_key; subsequent chunks
         always use skip_user_rate_limit=True so automated multi-part sends work.
 
+        The inter-chunk sleep is also floored at Bot.multipart_send_delay_seconds
+        (default 7s), to bias flood-routed parts of one logical message toward
+        arriving in order; 0 disables this and keeps only the pacing above.
+
         Args:
             channel: Channel name to send to.
             chunks: List of message strings to send in order.
@@ -1488,6 +1492,13 @@ class CommandManager:
             return True
         rate_limit_seconds = self.bot.config.getfloat('Bot', 'bot_tx_rate_limit_seconds', fallback=1.0)
         sleep_time = max(rate_limit_seconds + 0.5, 1.0)
+        # Extra gap so parts of one logical message tend to arrive in order despite
+        # differing mesh routes; independent of bot_tx_rate_limiter.wait_for_tx(), which
+        # still runs unchanged. 0 disables this and keeps only the existing pacing.
+        multipart_send_delay_seconds = self.bot.config.getfloat(
+            'Bot', 'multipart_send_delay_seconds', fallback=7.0
+        )
+        sleep_time = max(sleep_time, multipart_send_delay_seconds)
         for i, chunk in enumerate(chunks):
             if i > 0:
                 await self.bot.bot_tx_rate_limiter.wait_for_tx()
