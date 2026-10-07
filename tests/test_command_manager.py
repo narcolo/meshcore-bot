@@ -754,6 +754,69 @@ class TestSendChannelMessagesChunked:
         assert result is False
         manager.send_channel_message.assert_called_once()
 
+    @pytest.mark.asyncio
+    async def test_multipart_delay_default_floors_sleep_to_seven(self, cm_bot):
+        """Default multipart_send_delay_seconds (7) floors the inter-chunk sleep above
+        the existing ~1.5s pacing; wait_for_tx is unchanged and still runs N-1 times."""
+        cm_bot.config.set("Bot", "bot_tx_rate_limit_seconds", "1.0")  # existing sleep_time would be 1.5
+        manager = make_manager(cm_bot)
+        manager.send_channel_message = AsyncMock(return_value=True)
+        cm_bot.bot_tx_rate_limiter.wait_for_tx = AsyncMock(return_value=None)
+
+        with patch("modules.command_manager.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            result = await manager.send_channel_messages_chunked("general", ["a", "b", "c"])
+
+        assert result is True
+        assert manager.send_channel_message.call_count == 3
+        assert cm_bot.bot_tx_rate_limiter.wait_for_tx.call_count == 2
+        assert mock_sleep.await_count == 2
+        for call in mock_sleep.await_args_list:
+            assert call.args[0] == 7.0
+
+    @pytest.mark.asyncio
+    async def test_multipart_delay_zero_preserves_existing_pacing(self, cm_bot):
+        """multipart_send_delay_seconds=0 disables the extra floor; sleep stays at
+        the pre-existing bot_tx_rate_limit_seconds-derived value."""
+        cm_bot.config.set("Bot", "bot_tx_rate_limit_seconds", "1.0")  # sleep_time = 1.5
+        cm_bot.config.set("Bot", "multipart_send_delay_seconds", "0")
+        manager = make_manager(cm_bot)
+        manager.send_channel_message = AsyncMock(return_value=True)
+        cm_bot.bot_tx_rate_limiter.wait_for_tx = AsyncMock(return_value=None)
+
+        with patch("modules.command_manager.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            await manager.send_channel_messages_chunked("general", ["a", "b"])
+
+        mock_sleep.assert_awaited_once_with(1.5)
+
+    @pytest.mark.asyncio
+    async def test_multipart_delay_lower_than_existing_pacing_keeps_existing(self, cm_bot):
+        """A configured delay smaller than the existing pacing never shortens it (max(), not override)."""
+        cm_bot.config.set("Bot", "bot_tx_rate_limit_seconds", "5.0")  # sleep_time = 5.5
+        cm_bot.config.set("Bot", "multipart_send_delay_seconds", "3")
+        manager = make_manager(cm_bot)
+        manager.send_channel_message = AsyncMock(return_value=True)
+        cm_bot.bot_tx_rate_limiter.wait_for_tx = AsyncMock(return_value=None)
+
+        with patch("modules.command_manager.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            await manager.send_channel_messages_chunked("general", ["a", "b"])
+
+        mock_sleep.assert_awaited_once_with(5.5)
+
+    @pytest.mark.asyncio
+    async def test_four_chunks_produce_three_sleeps_none_before_first(self, cm_bot):
+        """N chunks produce exactly N-1 inter-part sleeps/waits; the first chunk sends immediately."""
+        cm_bot.config.set("Bot", "bot_tx_rate_limit_seconds", "1.0")
+        manager = make_manager(cm_bot)
+        manager.send_channel_message = AsyncMock(return_value=True)
+        cm_bot.bot_tx_rate_limiter.wait_for_tx = AsyncMock(return_value=None)
+
+        with patch("modules.command_manager.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            await manager.send_channel_messages_chunked("general", ["a", "b", "c", "d"])
+
+        assert manager.send_channel_message.call_count == 4
+        assert cm_bot.bot_tx_rate_limiter.wait_for_tx.call_count == 3
+        assert mock_sleep.await_count == 3
+
 
 # ---------------------------------------------------------------------------
 # TestCommandAliases (per-command config)
@@ -1075,6 +1138,33 @@ class TestSendDMLengthGuard:
 
         assert result is True
         cm_bot.meshcore.commands.send_msg.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_multipart_send_delay_does_not_affect_dm_auto_split(self, cm_bot):
+        """multipart_send_delay_seconds only applies to channel chunking (Scope note:
+        DM is already ACK-gated via send_msg_with_retry) -- DM's auto-split sleep
+        must stay exactly the pre-existing bot_tx_rate_limit_seconds-derived value."""
+        from meshcore import EventType
+
+        cm_bot.connected = True
+        cm_bot.meshcore = Mock()
+        contact = {"name": "Alice", "public_key": "ab12deadbeef"}
+        cm_bot.meshcore.get_contact_by_name = Mock(return_value=contact)
+        cm_bot.meshcore.commands = Mock(spec=["send_msg"])
+        cm_bot.meshcore.commands.send_msg = AsyncMock(
+            return_value=Mock(type=EventType.MSG_SENT, payload=None)
+        )
+        cm_bot.bot_tx_rate_limiter.wait_for_tx = AsyncMock(return_value=None)
+        cm_bot.config.set("Bot", "bot_tx_rate_limit_seconds", "0")  # sleep_time = 1.0
+        cm_bot.config.set("Bot", "multipart_send_delay_seconds", "99")  # must be ignored here
+        manager = make_manager(cm_bot)
+
+        oversized = "x" * 200
+        with patch("modules.command_manager.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            result = await manager.send_dm("Alice", oversized)
+
+        assert result is True
+        mock_sleep.assert_awaited_once_with(1.0)
 
 
 class TestGetMaxMessageLength:

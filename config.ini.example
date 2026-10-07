@@ -162,6 +162,12 @@ scheduled_command_timeout_seconds = 30
 # Prevents bot from overwhelming the mesh network
 bot_tx_rate_limit_seconds = 1.0
 
+# Minimum seconds between parts of one multi-part channel message (floors the
+# pacing above, does not replace it). Flood-routed parts can take different
+# paths and arrive out of order; a larger gap biases them toward arriving in
+# order. 0 disables this and keeps only bot_tx_rate_limit_seconds pacing.
+multipart_send_delay_seconds = 7
+
 # Per-user rate limit: minimum seconds between bot replies to the same user
 # User is identified by public key when available (DMs and channel when provided), else sender name
 # Channel senders are often matched by name only. Set to 0 or disable to effectively turn off per-user limiting
