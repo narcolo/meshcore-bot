@@ -1309,15 +1309,8 @@
     },
     "bajojajo": {
       "description": "Automatyczna odpowiedź w stylu Bendera na słowo 'bajo jajo'",
-      "responses": [
-        "Ja ci dam bajo jajo, {address}! 💪",
-        "Ja ci zaraz dam bajo jajo, {address}! 💪",
-        "Na Inowrocławskiej jesteś?! Na Inowrocławskiej jesteś?",
-        "Bajo jajo?! Ja ci zaraz dam, {address}! 🤖",
-        "Spokojnie, {address}. Bajo jajo to nie dla takich jak ty.",
-        "Ho, ho, {address}! Bajo jajo już w drodze!",
-        "{address}, bajo jajo się nie przeterminowało. Ja ci dam!"
-      ]
+      "base_response": "Ja ci dam bajo jajo, {address}! 💪",
+      "meme_suffix": "Na Inowrocławskiej jesteś?"
     }
   },
   "errors": {

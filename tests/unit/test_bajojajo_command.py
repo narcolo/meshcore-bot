@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Unit tests for BajojajoCommand — automatic Bender reaction to 'bajo jajo'."""
 
+import random
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
@@ -64,11 +66,62 @@ class TestBajojajoTriggerMatching:
         assert bajojajo_cmd.matches_custom_syntax(make_message("Dzień dobry wszystkim")) is False
 
     def test_does_not_match_inside_longer_word(self, bajojajo_cmd):
-        """'bajojajko' contains no exact 'bajojajo'/'bajo jajo' substring and must not match."""
+        """'bajojajko' contains no exact 'bajo...jajo' substring and must not match."""
         assert bajojajo_cmd.matches_custom_syntax(make_message("superbajojajko123")) is False
 
     def test_empty_content_does_not_match(self, bajojajo_cmd):
         assert bajojajo_cmd.matches_custom_syntax(make_message("")) is False
+
+    @pytest.mark.parametrize("content", [
+        "Bajojajobajojajo",
+        "hello Bajojajobajojajo",
+        "BAJOJAJOBAJOJAJO!",
+    ])
+    def test_matches_stuttered_repeat_with_no_separator(self, bajojajo_cmd, content):
+        """Two trigger repeats glued together with no space/punctuation between
+        them still match: TRIGGER_PATTERN has no boundary assertions, so
+        "bajo"+"jajo" is found as soon as it occurs, regardless of what comes
+        right before/after the match in the surrounding text.
+        """
+        assert bajojajo_cmd.matches_custom_syntax(make_message(content)) is True
+
+    @pytest.mark.parametrize("content", [
+        "bajo_jajo",
+        "bajo__jajo",
+        "bajo-jajo",
+        "bajo.jajo",
+        "bajo...jajo",
+        "bajo  jajo",
+        "bajo,jajo",
+        "bajo-_.jajo",
+    ])
+    def test_matches_with_various_non_word_separators(self, bajojajo_cmd, content):
+        """'bajo' then 'jajo' with any run of spaces/punctuation/underscores
+        between them must match -- not just a single plain space.
+        """
+        assert bajojajo_cmd.matches_custom_syntax(make_message(content)) is True
+
+    @pytest.mark.parametrize("content", [
+        "jajobajo",
+        "jajo bajo",
+        "JAJO BAJO",
+        "jajo-bajo",
+    ])
+    def test_reversed_word_order_does_not_match(self, bajojajo_cmd, content):
+        """'jajo' before 'bajo' is the wrong order and must never trigger."""
+        assert bajojajo_cmd.matches_custom_syntax(make_message(content)) is False
+
+    @pytest.mark.parametrize("content", [
+        "bajo tam jajo",
+        "bajo123jajo",
+        "bajoXjajo",
+        "bajo i jajo",
+    ])
+    def test_unrelated_word_between_bajo_and_jajo_does_not_match(self, bajojajo_cmd, content):
+        """Only non-word/underscore separators may sit between 'bajo' and
+        'jajo' -- an actual letter/digit/word in between must not match.
+        """
+        assert bajojajo_cmd.matches_custom_syntax(make_message(content)) is False
 
 
 @pytest.mark.unit
@@ -215,15 +268,23 @@ class TestBajojajoSenderTag:
 
 @pytest.mark.unit
 class TestBajojajoResponseContent:
-    """Covers spec items 3/12: randomized templates reusing hello's address pool."""
+    """Covers spec items 3/12 and the base+optional-suffix structure:
+    the main Bender phrase always comes first, the CB-radio meme reference is
+    an optional suffix that never leads and is never duplicated, and the
+    address keeps reusing hello's randomized vocabulary.
+    """
+
+    @pytest.mark.asyncio
+    async def test_response_starts_with_the_base_phrase(self, bajojajo_cmd):
+        bajojajo_cmd.include_sender = False  # isolate from the sender-tag feature (its own test class below)
+        bajojajo_cmd.send_response = AsyncMock(return_value=True)
+        msg = make_message("bajojajo")
+        await bajojajo_cmd.execute(msg)
+        response = bajojajo_cmd.send_response.call_args[0][1]
+        assert response.startswith("Ja ci dam bajo jajo, ")
 
     @pytest.mark.asyncio
     async def test_response_contains_an_address_from_minimal_fallback(self, bajojajo_cmd):
-        """Not every template has an {address} slot, so pin template selection
-        to one that does -- this test is about address-pool wiring, not
-        template randomization (covered separately below).
-        """
-        bajojajo_cmd._get_responses = lambda: ["{address}, bajo jajo!"]
         bajojajo_cmd.send_response = AsyncMock(return_value=True)
         msg = make_message("bajojajo")
         await bajojajo_cmd.execute(msg)
@@ -232,7 +293,6 @@ class TestBajojajoResponseContent:
 
     @pytest.mark.asyncio
     async def test_response_reuses_hello_commands_human_descriptors(self, bajojajo_cmd_with_hello):
-        bajojajo_cmd_with_hello._get_responses = lambda: ["{address}, bajo jajo!"]
         bajojajo_cmd_with_hello.send_response = AsyncMock(return_value=True)
         msg = make_message("bajojajo")
         hello_cmd = bajojajo_cmd_with_hello.bot.command_manager.commands['hello']
@@ -243,7 +303,7 @@ class TestBajojajoResponseContent:
         assert any(addr in response for addr in descriptor_pool)
 
     @pytest.mark.asyncio
-    async def test_responses_are_randomized_across_many_calls(self, bajojajo_cmd):
+    async def test_addresses_are_randomized_across_many_calls(self, bajojajo_cmd):
         bajojajo_cmd.send_response = AsyncMock(return_value=True)
         seen = set()
         for _ in range(40):
@@ -252,14 +312,60 @@ class TestBajojajoResponseContent:
             seen.add(bajojajo_cmd.send_response.call_args[0][1])
         assert len(seen) > 1
 
-    def test_fallback_templates_format_without_error(self):
-        """Not every template has an {address} slot (e.g. the repeated-question
-        one), so .format(address=...) must tolerate an unused kwarg rather than
-        assuming the placeholder is always present.
+    @pytest.mark.asyncio
+    async def test_meme_suffix_never_appears_before_base_phrase(self, bajojajo_cmd):
+        bajojajo_cmd.include_sender = False  # isolate from the sender-tag feature
+        bajojajo_cmd.send_response = AsyncMock(return_value=True)
+        for _ in range(40):
+            msg = make_message("bajojajo")
+            await bajojajo_cmd.execute(msg)
+            response = bajojajo_cmd.send_response.call_args[0][1]
+            assert response.startswith("Ja ci dam bajo jajo, ")
+            if BajojajoCommand.MEME_SUFFIX_PL in response:
+                assert response.endswith(BajojajoCommand.MEME_SUFFIX_PL)
+
+    @pytest.mark.asyncio
+    async def test_meme_suffix_never_repeated_within_one_reply(self, bajojajo_cmd):
+        bajojajo_cmd.send_response = AsyncMock(return_value=True)
+        for _ in range(40):
+            msg = make_message("bajojajo")
+            await bajojajo_cmd.execute(msg)
+            response = bajojajo_cmd.send_response.call_args[0][1]
+            assert response.count(BajojajoCommand.MEME_SUFFIX_PL) <= 1
+
+    @pytest.mark.asyncio
+    async def test_meme_suffix_is_optional_not_always_present(self, bajojajo_cmd):
+        """Appears only occasionally, per spec -- across many calls we should
+        see both with-suffix and without-suffix replies.
         """
-        for template in BajojajoCommand.RESPONSES_FALLBACK_PL:
-            formatted = template.format(address="istoto testowa")
-            assert isinstance(formatted, str) and len(formatted) > 0
+        bajojajo_cmd.send_response = AsyncMock(return_value=True)
+        with_suffix = without_suffix = 0
+        for _ in range(60):
+            msg = make_message("bajojajo")
+            await bajojajo_cmd.execute(msg)
+            response = bajojajo_cmd.send_response.call_args[0][1]
+            if BajojajoCommand.MEME_SUFFIX_PL in response:
+                with_suffix += 1
+            else:
+                without_suffix += 1
+        assert with_suffix > 0
+        assert without_suffix > 0
+
+    @pytest.mark.asyncio
+    async def test_meme_suffix_always_appended_when_forced(self, bajojajo_cmd, monkeypatch):
+        monkeypatch.setattr(random, "random", lambda: 0.0)  # force suffix branch
+        bajojajo_cmd.include_sender = False  # isolate from the sender-tag feature
+        bajojajo_cmd.send_response = AsyncMock(return_value=True)
+        msg = make_message("bajojajo")
+        await bajojajo_cmd.execute(msg)
+        response = bajojajo_cmd.send_response.call_args[0][1]
+        assert response.startswith("Ja ci dam bajo jajo, ")
+        assert response.endswith(f"! 💪 {BajojajoCommand.MEME_SUFFIX_PL}")
+
+    def test_base_template_formats_without_error(self):
+        formatted = BajojajoCommand.BASE_RESPONSE_PL.format(address="istoto testowa")
+        assert "istoto testowa" in formatted
+        assert formatted.startswith("Ja ci dam bajo jajo, ")
 
 
 @pytest.mark.unit
@@ -281,15 +387,7 @@ class TestBajojajoDisabledConfiguration:
 
 
 @pytest.mark.unit
-class TestBajojajoConfigurableTriggers:
-    def test_custom_triggers_from_config(self, command_mock_bot):
-        command_mock_bot.command_manager.commands = {}
-        command_mock_bot.config.add_section('Bajojajo_Command')
-        command_mock_bot.config.set('Bajojajo_Command', 'triggers', 'kurczaczek')
-        cmd = BajojajoCommand(command_mock_bot)
-        assert cmd.matches_custom_syntax(make_message("ale ten kurczaczek")) is True
-        assert cmd.matches_custom_syntax(make_message("bajojajo")) is False
-
+class TestBajojajoConfigurableSettings:
     def test_custom_cooldown_from_config(self, command_mock_bot):
         command_mock_bot.command_manager.commands = {}
         command_mock_bot.config.add_section('Bajojajo_Command')

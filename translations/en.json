@@ -1412,15 +1412,8 @@
       ]    },
     "bajojajo": {
       "description": "Automatic Bender-style reply to the Polish 'bajo jajo' CB-radio catchphrase",
-      "responses": [
-        "I'll give you bajo jajo, {address}!",
-        "I'll give you bajo jajo right now, {address}!",
-        "Bajo jajo, huh?! Bajo jajo, huh?",
-        "Bajo jajo?! I'll give it to you right now, {address}!",
-        "Easy there, {address}. Bajo jajo isn't for the likes of you.",
-        "Ho ho, {address}! Bajo jajo is on its way!",
-        "{address}, bajo jajo never expires. I'll give it to you!"
-      ]
+      "base_response": "I'll give you bajo jajo, {address}! 💪",
+      "meme_suffix": "Are you on Inowrocławska Street?"
     }
   },
   "elapsed": {

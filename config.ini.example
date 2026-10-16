@@ -1716,14 +1716,14 @@ enabled = true
 # channels = bot
 
 [Bajojajo_Command]
-# Automatic Bender-style reply when 'bajojajo'/'bajo jajo' appears anywhere in
-# a message (not a slash command -- fires on ordinary chatter, like a keyword
-# reaction). Not a false trigger on a nickname that happens to contain it;
-# only the message body is checked.
+# Automatic Bender-style reply when 'bajo' is immediately followed by 'jajo'
+# (any amount of spacing/punctuation between them, e.g. "bajojajo", "bajo jajo",
+# "bajo---jajo") anywhere in a message (not a slash command -- fires on
+# ordinary chatter, like a keyword reaction). Not a false trigger on a
+# nickname that happens to contain it; only the message body is checked.
+# The trigger regex itself is fixed (not configurable): TRIGGER_PATTERN in
+# modules/commands/bajojajo_command.py.
 enabled = true
-# Comma-separated trigger phrases, matched case-insensitively anywhere in the
-# message body, with or without the internal space.
-# triggers = bajojajo,bajo jajo
 # Minimum seconds between replies to the same sender (reuses the bot's normal
 # per-user cooldown, so repeated triggering doesn't spam the channel).
 # cooldown_seconds = 20
