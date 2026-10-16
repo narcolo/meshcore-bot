@@ -1715,6 +1715,26 @@ include_sender = false
 enabled = true
 # channels = bot
 
+[Bajojajo_Command]
+# Automatic Bender-style reply when 'bajojajo'/'bajo jajo' appears anywhere in
+# a message (not a slash command -- fires on ordinary chatter, like a keyword
+# reaction). Not a false trigger on a nickname that happens to contain it;
+# only the message body is checked.
+enabled = true
+# Comma-separated trigger phrases, matched case-insensitively anywhere in the
+# message body, with or without the internal space.
+# triggers = bajojajo,bajo jajo
+# Minimum seconds between replies to the same sender (reuses the bot's normal
+# per-user cooldown, so repeated triggering doesn't spam the channel).
+# cooldown_seconds = 20
+# Tag the sender in channel replies, e.g. "@[Alice] Ja ci dam bajo jajo, ...!"
+# (DMs are never tagged -- the recipient is already the only other party).
+# Default: true.
+# include_sender = true
+# Restrict this reaction to the #bot channel only (overrides monitor_channels
+# for this command); DMs are always allowed regardless of this setting.
+channels = #bot
+
 [Dice_Command]
 enabled = true
 # channels =
