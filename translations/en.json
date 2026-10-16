@@ -1409,7 +1409,19 @@
         "I exist, apparently. What do you need?",
         "Oh, so NOW you need me. Typical.",
         "State your business before I change my mind."
-      ]    }
+      ]    },
+    "bajojajo": {
+      "description": "Automatic Bender-style reply to the Polish 'bajo jajo' CB-radio catchphrase",
+      "responses": [
+        "I'll give you bajo jajo, {address}!",
+        "I'll give you bajo jajo right now, {address}!",
+        "Bajo jajo, huh?! Bajo jajo, huh?",
+        "Bajo jajo?! I'll give it to you right now, {address}!",
+        "Easy there, {address}. Bajo jajo isn't for the likes of you.",
+        "Ho ho, {address}! Bajo jajo is on its way!",
+        "{address}, bajo jajo never expires. I'll give it to you!"
+      ]
+    }
   },
   "elapsed": {
     "sync_device_clock": "Sync Device Clock"
