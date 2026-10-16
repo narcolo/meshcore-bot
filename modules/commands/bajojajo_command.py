@@ -11,7 +11,7 @@ ThankyouCommand uses for "thanks".
 
 import random
 import re
-from typing import Any, List, Optional
+from typing import Any, List
 
 from .base_command import BaseCommand
 from .hello_command import HelloCommand
@@ -35,22 +35,25 @@ class BajojajoCommand(BaseCommand):
     requires_dm = False
     requires_internet = False
 
-    DEFAULT_TRIGGERS = ["bajojajo", "bajo jajo"]
+    # bajo, then jajo, in that exact order, with zero or more non-word/
+    # underscore separators (spaces, punctuation, etc.) between them. No word
+    # boundaries: matches anywhere in the body, including back-to-back
+    # stutters ("Bajojajobajojajo") with no separator of their own. Reversed
+    # order ("jajobajo") never matches since the pattern is order-fixed.
+    TRIGGER_PATTERN = re.compile(r"bajo[\W_]*jajo", re.IGNORECASE)
 
     # Last-resort address pool -- only used if the hello command's own
     # human_descriptors (translated or fallback) can't be reached at all.
     # See _get_address_pool(): the real vocabulary always comes from there.
     _MINIMAL_ADDRESS_FALLBACK = ["istoto", "człowieku", "istoto krzemowa"]
 
-    RESPONSES_FALLBACK_PL = [
-        "Ja ci dam bajo jajo, {address}! 💪",
-        "Ja ci zaraz dam bajo jajo, {address}! 💪",
-        "Na Inowrocławskiej jesteś?! Na Inowrocławskiej jesteś?",
-        "Bajo jajo?! Ja ci zaraz dam, {address}! 🤖",
-        "Spokojnie, {address}. Bajo jajo to nie dla takich jak ty.",
-        "Ho, ho, {address}! Bajo jajo już w drodze!",
-        "{address}, bajo jajo się nie przeterminowało. Ja ci dam!",
-    ]
+    # The main Bender phrase always comes first; the CB-radio meme reference
+    # is an optional, never-duplicated suffix appended after it (never
+    # prepended) -- see _build_response().
+    BASE_RESPONSE_PL = "Ja ci dam bajo jajo, {address}! 💪"
+    MEME_SUFFIX_PL = "Na Inowrocławskiej jesteś?"
+    # Occasional, not every reply (per the original "bajo jajo" meme spec).
+    MEME_SUFFIX_PROBABILITY = 0.3
 
     # Sender tag prepended to the reply (channel messages only -- a DM's only
     # other party is already the sender, so no tag is needed there). Same
@@ -60,10 +63,6 @@ class BajojajoCommand(BaseCommand):
     SENDER_MENTION_FORMAT = "@[{sender}] "
 
     settings_schema = [
-        {"key": "triggers", "label": "Trigger phrases", "type": "list",
-         "default": "bajojajo,bajo jajo",
-         "help": "Comma-separated phrases to react to, matched anywhere in the "
-                 "message body (case-insensitive, punctuation-agnostic)."},
         {"key": "cooldown_seconds", "label": "Per-sender cooldown (seconds)", "type": "int",
          "default": 20, "min": 0,
          "help": "Minimum seconds between replies to the same sender, so repeated "
@@ -89,53 +88,26 @@ class BajojajoCommand(BaseCommand):
         self.include_sender = self.get_config_value(
             'Bajojajo_Command', 'include_sender', fallback=True, value_type='bool'
         )
-        triggers = self.get_config_value(
-            'Bajojajo_Command', 'triggers', fallback=None, value_type='list'
-        )
-        self._trigger_pattern = self._compile_trigger_pattern(triggers or self.DEFAULT_TRIGGERS)
 
     def get_help_text(self) -> str:
         return ""  # hidden automatic reaction, not a user-facing command
 
-    @staticmethod
-    def _compile_trigger_pattern(triggers: List[str]) -> Optional["re.Pattern[str]"]:
-        """Build a single case-insensitive regex matching any configured trigger
-        phrase anywhere in the text, with word boundaries so it doesn't fire
-        inside an unrelated longer word, and flexible internal whitespace so a
-        multi-word phrase matches with or without the space.
-        """
-        alternatives = []
-        for trigger in triggers:
-            trigger = (trigger or "").strip()
-            if not trigger:
-                continue
-            tokens = trigger.split()
-            if not tokens:
-                continue
-            alternatives.append(r"\s*".join(re.escape(t) for t in tokens))
-        if not alternatives:
-            return None
-        pattern = r"(?<!\w)(?:" + "|".join(alternatives) + r")(?!\w)"
-        return re.compile(pattern, re.IGNORECASE | re.UNICODE)
-
     def matches_custom_syntax(self, message: MeshMessage) -> bool:
-        """Match the trigger phrase anywhere in the message body.
+        """Match TRIGGER_PATTERN anywhere in the message body.
 
         Only ``message.content`` (the actual message text) is inspected --
-        never the sender's nickname/display name, which message_handler
-        already keeps separate from content for both channel ("Name: body")
-        and DM messages. A single match is enough; occurrence count doesn't
-        matter since should_execute() only ever sees True/False.
+        never the sender's nickname/display name/metadata, which
+        message_handler already keeps separate from content for both channel
+        ("Name: body") and DM messages. A single match is enough; occurrence
+        count doesn't matter since should_execute() only ever sees True/False.
 
         ``@[...]`` mentions are stripped first (reusing BaseCommand's own
         mention handling), so addressing a user whose *name* happens to be
         "Bajojajo" (e.g. ``@[Bajojajo] hej``) doesn't itself count as a
         trigger -- only the keyword appearing in the actual written text does.
         """
-        if not self._trigger_pattern:
-            return False
         content = self._strip_mentions(message.content or "")
-        return bool(self._trigger_pattern.search(content))
+        return bool(self.TRIGGER_PATTERN.search(content))
 
     def can_execute(self, message: MeshMessage, skip_channel_check: bool = False) -> bool:
         if not self.enabled:
@@ -166,19 +138,34 @@ class BajojajoCommand(BaseCommand):
 
         return self._MINIMAL_ADDRESS_FALLBACK
 
-    def _get_responses(self) -> List[str]:
-        responses = self.translate_get_value('commands.bajojajo.responses')
-        if responses and isinstance(responses, list) and len(responses) > 0:
-            return responses
-        return self.RESPONSES_FALLBACK_PL
+    def _get_base_template(self) -> str:
+        template = self.translate_get_value('commands.bajojajo.base_response')
+        if isinstance(template, str) and template:
+            return template
+        return self.BASE_RESPONSE_PL
+
+    def _get_meme_suffix(self) -> str:
+        suffix = self.translate_get_value('commands.bajojajo.meme_suffix')
+        if isinstance(suffix, str) and suffix:
+            return suffix
+        return self.MEME_SUFFIX_PL
 
     def _build_response(self) -> str:
-        template = random.choice(self._get_responses())
+        """Main Bender phrase first, always; the CB-radio meme reference is
+        an optional suffix appended after it -- never prepended, never
+        repeated within the same reply (it is appended at most once, here).
+        """
         address = random.choice(self._get_address_pool())
+        template = self._get_base_template()
         try:
-            return template.format(address=address)
+            response = template.format(address=address)
         except (KeyError, IndexError):
-            return template
+            response = template
+
+        if random.random() < self.MEME_SUFFIX_PROBABILITY:
+            response = f"{response} {self._get_meme_suffix()}"
+
+        return response
 
     def _get_sender_mention(self, message: MeshMessage) -> str:
         """Build the "@[name] " tag for the sender of *message*, or "" when the
