@@ -115,3 +115,24 @@ with no merge conflict. It's covered by a regression test
 test_no_reply_prefix_falls_back_to_inline_sender_tag`) — if a future upstream sync
 wholesale-replaces `path_command.py` again, that test should fail loudly instead of
 the fallback silently disappearing for months.
+
+**Second casualty of the same pattern, restored 2026-10-24.** Path command's
+hex-or-phrase postfix handling — a text argument that isn't valid path hex is treated
+as a phrase and echoed next to the sender tag, the same way test command's
+`phrase_part` works, while a hex argument still decodes as path data via
+`_is_hex_path()` — was added 2026-04-06 (`ea19e72`, narcolo PR #14) but silently lost
+in the same `882930a` upstream-sync merge, with no conflict, because `path_command.py`
+had been refactored enough by then (`split_trigger_and_args`,
+`enforce_path_byte_requirement`) that `git merge` found the original commit already an
+ancestor of `main` — the loss was a later commit overwriting the same lines in the
+ordinary course of a refactor, not a revert, so merging the old commit again did
+nothing. Recovered by cherry-picking the diff and manually resolving it against the
+current `execute()`/`_send_path_response()` structure (`653fe76`). Covered by
+regression tests in `tests/unit/test_path_command_utf8_message_limits.py`
+(`test_phrase_appends_to_inline_sender_tag`,
+`test_phrase_appends_after_configured_reply_prefix`) and
+`TestPathCommandIsHexPath` — same role as the sender-tag test above: a future
+wholesale rewrite of `path_command.py` should fail these loudly instead of silently
+dropping the behavior again. A restored copy of the fix also lives on
+`fix/path-command-hex-or-phrase` (narcolo), kept in sync with `main` so it's ready to
+reapply without redoing the conflict resolution if this happens a third time.
