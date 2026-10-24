@@ -474,6 +474,41 @@ class PathCommand(BaseCommand):
             return False
         return super().can_execute(message)
 
+    def _is_hex_path(self, text: str) -> bool:
+        """Check if text looks like hex path data rather than a text phrase.
+
+        Matches patterns handled by _decode_path():
+        - Comma-separated hex tokens: "01,5f,a4" (each 2/4/6 hex chars)
+        - Continuous hex string: "015fa4" (all hex chars, even length >= 2)
+        - Space-separated hex tokens: "01 5f a4" (each 2/4/6 hex chars)
+        - Any of the above with a hop-count suffix: "01,5f (2 hops)"
+        """
+        # Strip hop-count suffix before checking
+        cleaned = re.sub(r'\s*\([^)]*hops?[^)]*\)', '', text, flags=re.IGNORECASE).strip()
+        if not cleaned:
+            return False
+
+        # Comma-separated hex tokens
+        if ',' in cleaned:
+            tokens = [t.strip() for t in cleaned.split(',') if t.strip()]
+            return bool(tokens) and all(
+                len(t) in (2, 4, 6) and all(c in '0123456789aAbBcCdDeEfF' for c in t)
+                for t in tokens
+            )
+
+        # Space-separated hex tokens (each 2/4/6 hex chars)
+        tokens = cleaned.split()
+        if len(tokens) > 1:
+            lengths = {len(t) for t in tokens}
+            return len(lengths) == 1 and next(iter(lengths)) in (2, 4, 6) and all(
+                all(c in '0123456789aAbBcCdDeEfF' for c in t) for t in tokens
+            )
+
+        # Single continuous hex string (even length, >= 2 chars)
+        return len(cleaned) >= 2 and len(cleaned) % 2 == 0 and all(
+            c in '0123456789aAbBcCdDeEfF' for c in cleaned
+        )
+
     async def execute(self, message: MeshMessage) -> bool:
         """Execute path decode command"""
         self.logger.info(f"Path command executed with content: {message.content}")
@@ -489,14 +524,20 @@ class PathCommand(BaseCommand):
         self._last_path_distance_km = None
 
         _trigger, args = self.split_trigger_and_args(message.content)
+        phrase = ""
         if not args:
             # No arguments — decode the current message's routing path
             response = await self._extract_path_from_recent_messages(message)
-        else:
+        elif self._is_hex_path(args):
+            # Hex path data provided explicitly
             response = await self._decode_path(args, message=message)
+        else:
+            # Text phrase - use current message's routing path (like test command)
+            phrase = args
+            response = await self._extract_path_from_recent_messages(message)
 
         # Send the response (may be split into multiple messages if long)
-        await self._send_path_response(message, response)
+        await self._send_path_response(message, response, phrase)
         return True
 
     async def _decode_path(
@@ -1059,17 +1100,22 @@ class PathCommand(BaseCommand):
 
         # Return all lines - let _send_path_response handle the splitting
         return "\n".join(lines)
-
-
-    async def _send_path_response(self, message: MeshMessage, response: str):
+    async def _send_path_response(self, message: MeshMessage, response: str, phrase: str = ""):
         """Send path response, splitting into multiple messages if necessary"""
         prefix = await self._format_path_reply_prefix(message)
+        phrase_part = f": {phrase}" if phrase else ""
         if not prefix:
             # No configured reply_prefix: fall back to a "@[sender]" tag
             # (see CLAUDE.md for why this needs a regression test).
-            prefix = f"@[{message.sender_id}]\n"
+            prefix = f"@[{message.sender_id}]{phrase_part}\n"
+        elif phrase:
+            # Configured reply_prefix wins outright, but the phrase (a text
+            # argument that wasn't valid path hex, treated like test command's
+            # phrase) still needs to surface somewhere.
+            prefix += f"{phrase}\n"
         self.last_response = prefix + response if prefix else response
 
+        # Get dynamic max message length based on message type and bot username
         max_length = self.get_max_message_length(message)
         prefix_len = self._count_byte_length(prefix)
         first_segment_max = max_length - prefix_len

@@ -182,6 +182,74 @@ class TestPathCommandReplyPrefix:
         assert payload == "[alice]\nline1"
         assert "@[alice]" not in payload
 
+    @pytest.mark.asyncio
+    async def test_phrase_appends_to_inline_sender_tag(self, path_cmd, mock_bot):
+        """Restored from orphaned narcolo PR #14 (ea19e72), lost in the same
+        upstream sync as the sender-tag fallback above.
+
+        A text phrase (not valid path hex) must surface next to the sender
+        tag, the same way test command's phrase_part does.
+        """
+        path_cmd.path_reply_prefix = ""
+        path_cmd.get_max_message_length = lambda _msg: 200
+        msg = MeshMessage(content="path hi", channel="general", is_dm=False, sender_id="alice")
+        await path_cmd._send_path_response(msg, "line1", phrase="hi")
+        payload = path_cmd.send_response.call_args[0][1]
+        assert payload == "@[alice]: hi\nline1"
+
+    @pytest.mark.asyncio
+    async def test_phrase_appends_after_configured_reply_prefix(self, path_cmd, mock_bot):
+        path_cmd.path_reply_prefix = "[{sender}]"
+        path_cmd.get_max_message_length = lambda _msg: 200
+        msg = MeshMessage(content="path hi", channel="general", is_dm=False, sender_id="alice")
+        await path_cmd._send_path_response(msg, "line1", phrase="hi")
+        payload = path_cmd.send_response.call_args[0][1]
+        assert payload == "[alice]\nhi\nline1"
+
+
+@pytest.mark.unit
+class TestPathCommandIsHexPath:
+    """_is_hex_path distinguishes hex path data from a text phrase (ea19e72)."""
+
+    @pytest.fixture
+    def path_cmd(self, mock_bot):
+        return PathCommand(mock_bot)
+
+    @pytest.mark.parametrize("text", [
+        "01,5f,a4", "01 5f a4", "015fa4", "01,5f (2 hops)", "a449cd",
+    ])
+    def test_recognizes_hex_forms(self, path_cmd, text):
+        assert path_cmd._is_hex_path(text) is True
+
+    @pytest.mark.parametrize("text", [
+        "hi", "hello there", "", "123",  # odd-length string is not valid hex path
+    ])
+    def test_rejects_text_phrases(self, path_cmd, text):
+        assert path_cmd._is_hex_path(text) is False
+
+    @pytest.mark.asyncio
+    async def test_execute_treats_hex_arg_as_path_decode(self, path_cmd, mock_bot):
+        path_cmd._decode_path = AsyncMock(return_value="decoded")
+        path_cmd._extract_path_from_recent_messages = AsyncMock(return_value="extracted")
+        path_cmd._send_path_response = AsyncMock()
+        path_cmd.enforce_path_byte_requirement = AsyncMock(return_value=True)
+        msg = MeshMessage(content="path 01,5f", channel="general", is_dm=False, sender_id="alice")
+        await path_cmd.execute(msg)
+        path_cmd._decode_path.assert_awaited_once_with("01,5f", message=msg)
+        path_cmd._send_path_response.assert_awaited_once_with(msg, "decoded", "")
+
+    @pytest.mark.asyncio
+    async def test_execute_treats_text_arg_as_phrase(self, path_cmd, mock_bot):
+        path_cmd._decode_path = AsyncMock(return_value="decoded")
+        path_cmd._extract_path_from_recent_messages = AsyncMock(return_value="extracted")
+        path_cmd._send_path_response = AsyncMock()
+        path_cmd.enforce_path_byte_requirement = AsyncMock(return_value=True)
+        msg = MeshMessage(content="path hi there", channel="general", is_dm=False, sender_id="alice")
+        await path_cmd.execute(msg)
+        path_cmd._decode_path.assert_not_awaited()
+        path_cmd._extract_path_from_recent_messages.assert_awaited_once_with(msg)
+        path_cmd._send_path_response.assert_awaited_once_with(msg, "extracted", "hi there")
+
 
 class MockTranslateForSend:
     def __call__(self, key: str, **kwargs):
